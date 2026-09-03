@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── KONEK AI design tokens ───────────────────────────────────────────
+   Pure Black #0F0F0F · Pure White #FFFFFF · Accent Blue #0A84FF
+   Border #E5E5E5 · Gray #F5F5F5 — no gradients, no shadows.        */
+
+:root {
+  --paper: #ffffff;
+  --surface: #f5f5f5;
+  --ink: #0f0f0f;
+  --muted: #6b6b6b;
+  --line: #e5e5e5;
+  --accent: #0a84ff;
+  color-scheme: light;
+}
+
+.dark {
+  --paper: #0f0f0f;
+  --surface: #161616;
+  --ink: #ffffff;
+  --muted: #8a8a8a;
+  --line: #262626;
+  --accent: #0a84ff;
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  ::selection {
+    background: var(--ink);
+    color: var(--paper);
+  }
+}
+
+@layer components {
+  /* Section rhythm — massive whitespace is part of the brand */
+  .shell {
+    @apply mx-auto w-full max-w-shell px-6 md:px-10;
+  }
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-brand text-muted;
+  }
+  .hairline {
+    @apply border-t border-line;
+  }
+  .card {
+    @apply rounded-brand border border-line bg-paper;
+  }
+  .focus-ring {
+    @apply outline-none ring-offset-2 ring-offset-paper focus-visible:ring-2 focus-visible:ring-accent;
+  }
+}
+
+/* Thin, quiet scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+  border: 3px solid var(--paper);
+}
