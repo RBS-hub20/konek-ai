@@ -44,7 +44,7 @@ const server = http.createServer(async (req, res) => {
     const phrase = url.searchParams.get('text')
       ?? 'Hi po Renmar, si Kai to from Nova Aesthetics. May quick question lang po ako.';
     try {
-      const result = await ttsCheck(phrase, language);
+      const result = await ttsCheck(phrase, language, url.searchParams.get('model'));
       return json(res, result.bytes > 0 ? 200 : 502, result);
     } catch (err) {
       return json(res, 502, { ok: false, error: err.message, hint: 'Check CARTESIA_API_KEY, CARTESIA_MODEL and the voice name.' });
@@ -84,12 +84,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 /** Runs one short synthesis and counts the audio that comes back. */
-function ttsCheck(phrase, language) {
+function ttsCheck(phrase, language, model) {
   return new Promise((resolve, reject) => {
     let bytes = 0;
     let chunks = 0;
     const stream = new CartesiaStream({
       language,
+      model,
       onAudio: (b64) => { chunks += 1; bytes += Buffer.from(b64, 'base64').length; },
       onError: (err) => { settle(() => reject(err)); },
     });
@@ -106,7 +107,7 @@ function ttsCheck(phrase, language) {
           language,
           spoken: shapeForSpeech(phrase, language),
           voice: stream.voice,
-          model: config.cartesiaModel,
+          model: stream.model,
           /* 8000 mu-law bytes is one second of phone audio. */
           approxSeconds: Number((bytes / 8000).toFixed(2)),
           ...(bytes === 0 ? { error: 'Connected but no audio came back — check the model id and voice.' } : {}),

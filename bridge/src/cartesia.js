@@ -162,8 +162,9 @@ export function shapeForSpeech(text, language = 'EN') {
  * instead of talking over the caller.
  */
 export class CartesiaStream {
-  constructor({ language = 'EN', onAudio, onError }) {
+  constructor({ language = 'EN', model = null, onAudio, onError }) {
     this.language = language;
+    this.model = model || modelForLanguage(language);
     this.onAudio = onAudio;
     this.onError = onError;
     this.ws = null;
@@ -266,7 +267,7 @@ export class CartesiaStream {
   send(transcript, more) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const body = {
-      model_id: config.cartesiaModel,
+      model_id: this.model,
       transcript,
       voice: { mode: 'id', id: this.voice.id },
       output_format: {
@@ -295,6 +296,16 @@ export class CartesiaStream {
     try { this.ws?.close(); } catch { /* already gone */ }
     this.ready = false;
   }
+}
+
+/**
+ * Which Sonic model to use. sonic-2 does not accept every language — Tagalog
+ * and Arabic are rejected outright — so the model is selectable per language
+ * rather than assumed to be universal.
+ */
+export function modelForLanguage(languageKey) {
+  const code = cartesiaLanguage(languageKey);
+  return config.modelByLanguage[code] ?? config.cartesiaModel;
 }
 
 /** KONEK language keys to Cartesia language codes. */

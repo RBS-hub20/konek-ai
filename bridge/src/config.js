@@ -39,6 +39,14 @@ export const config = {
      Taglish with an English voice instead. */
   langTl: read('CARTESIA_LANG_TL', 'tl'),
   langTaglish: read('CARTESIA_LANG_TAGLISH', 'tl'),
+  /* sonic-2 rejects tl and ar, so those default to the newer model. Override
+     any of them if your account has different model access. */
+  modelByLanguage: {
+    en: read('CARTESIA_MODEL_EN', read('CARTESIA_MODEL', 'sonic-2')),
+    tl: read('CARTESIA_MODEL_TL', 'sonic-3'),
+    ar: read('CARTESIA_MODEL_AR', 'sonic-3'),
+    hi: read('CARTESIA_MODEL_HI', 'sonic-3'),
+  },
 
   /* Hard stop so a stuck call can never bill forever. */
   maxCallSeconds: Number(read('MAX_CALL_SECONDS', '600')),
