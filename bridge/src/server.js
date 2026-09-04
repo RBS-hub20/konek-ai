@@ -170,6 +170,10 @@ async function callProbe(language, seconds) {
     approxSecondsOut: Number((stub.bytes / 8000).toFixed(2)),
     firstFrameMs: stub.firstFrameMs,
     ttsFailed: session.ttsFailed,
+    stage: session.stage ?? 'not started',
+    lastError: session.lastError ?? null,
+    /* Diagnostic lines only — the transcript scope is excluded on purpose. */
+    log: recentLogs(120).filter((l) => !l.includes('(transcript)')).slice(-25),
   };
   try { session.end('Completed'); } catch { /* already closed */ }
   return result;

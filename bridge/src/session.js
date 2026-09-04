@@ -70,7 +70,8 @@ export class CallSession {
         this.params = msg.start?.customParameters ?? {};
         log.info('call', `start ${this.callSid}`, this.params);
         this.connectOpenAI().catch((err) => {
-          log.error('openai', `could not connect: ${err.message}`);
+          this.lastError = err?.message ?? String(err);
+          log.error('openai', `could not connect: ${this.lastError}`);
           this.end('Failed');
         });
         this.timeout = setTimeout(() => {
@@ -103,6 +104,7 @@ export class CallSession {
   /* ── OpenAI Realtime ─────────────────────────────────────────── */
 
   async connectOpenAI() {
+    this.stage = 'fetching call config';
     const callCfg = await fetchCallConfig({
       businessId: this.params.businessId,
       vibe: this.params.vibe,
@@ -111,6 +113,7 @@ export class CallSession {
     });
     this.callCfg = callCfg;
 
+    this.stage = 'resolving voice';
     this.language = callCfg.language ?? this.params.language ?? 'EN';
 
     /* Bring Sonic up before the model starts talking. If it cannot connect we
@@ -123,13 +126,16 @@ export class CallSession {
           onError: () => this.failoverToOpenAIVoice(),
         });
         await this.tts.connect();
+        this.stage = 'cartesia connected';
       } catch (err) {
+        this.lastError = `cartesia: ${err?.message ?? err}`;
         log.warn('cartesia', `unavailable, using the OpenAI voice: ${err.message}`);
         this.tts = null;
         this.ttsFailed = true;
       }
     }
 
+    this.stage = 'connecting to openai';
     const url = `${config.realtimeUrl}?model=${encodeURIComponent(config.realtimeModel)}`;
     const ws = new WebSocket(url, {
       headers: {
@@ -140,6 +146,7 @@ export class CallSession {
     this.openai = ws;
 
     ws.on('open', () => {
+      this.stage = 'openai connected';
       log.info('openai', `connected (${config.realtimeModel}) for ${this.callSid}`);
       /* With Sonic speaking, the model only needs to produce text — asking it
          for audio as well would bill for a voice nobody hears. */
@@ -183,6 +190,7 @@ export class CallSession {
       if (!this.closed) this.end('Completed');
     });
     ws.on('error', (err) => {
+      this.lastError = `openai: ${err.message}`;
       log.error('openai', `socket error: ${err.message}`);
       this.end('Failed');
     });
