@@ -162,9 +162,23 @@ guarantees a terminal mark so the last word is not clipped. It deliberately does
 not insert pauses around every `po` — mid-phrase `po` takes no pause, and a
 comma in the wrong place sounds worse than none.
 
-Sonic has no Filipino voice, so Tagalog and Taglish are synthesized with the
-English voice. That works because the sentence frame of Taglish is largely
-English; pure Tagalog will carry an English accent.
+Sonic rejects a language its voice does not speak, so the voice and the
+language code are chosen together. This account has 417 English, 49 Hindi, 15
+Arabic and 8 Tagalog voices, so every language the dashboard offers has a
+native voice:
+
+| Language | Code | Default voice | Override |
+| --- | --- | --- | --- |
+| English | `en` | `Skylar` | `CARTESIA_VOICE_NAME` |
+| Tagalog / Taglish | `tl` | `Angel` | `CARTESIA_VOICE_TL` |
+| Arabic | `ar` | `Rania` | `CARTESIA_VOICE_AR` |
+| Hindi | `hi` | `Ishani` | `CARTESIA_VOICE_HI` |
+
+Taglish uses a Tagalog voice, which handles the English words inside a Taglish
+sentence better than an English voice handles the Tagalog ones. Set
+`CARTESIA_LANG_TAGLISH=en` to flip that.
+
+Browse what is available with `/voices?language=tl` or `/voices?search=skylar`.
 
 ## What it does during a call
 

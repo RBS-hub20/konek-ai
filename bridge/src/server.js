@@ -3,7 +3,7 @@ import { WebSocketServer } from 'ws';
 import { config, assertConfig, useCartesia } from './config.js';
 import { log } from './log.js';
 import { CallSession } from './session.js';
-import { CartesiaStream, listVoices, resolveVoice, shapeForSpeech } from './cartesia.js';
+import { CartesiaStream, listVoices, resolveVoiceFor, shapeForSpeech } from './cartesia.js';
 
 /* The Railway service: an HTTP server for health checks, with a websocket
    endpoint at /media-stream that Twilio connects each live call to. */
@@ -40,7 +40,7 @@ const server = http.createServer(async (req, res) => {
      without placing a call, and it reports the real error when it does not. */
   if (url.pathname === '/tts-check') {
     if (!config.cartesiaKey) return json(res, 400, { error: 'CARTESIA_API_KEY is not set' });
-    const language = url.searchParams.get('language') ?? 'TAGLISH';
+    const language = (url.searchParams.get('language') ?? 'TAGLISH').toUpperCase();
     const phrase = url.searchParams.get('text')
       ?? 'Hi po Renmar, si Kai to from Nova Aesthetics. May quick question lang po ako.';
     try {
@@ -128,10 +128,14 @@ function ttsCheck(phrase, language) {
 /* Resolved once at boot so /health can show which voice calls will use. */
 let resolvedVoiceName = null;
 if (useCartesia()) {
-  resolveVoice()
-    .then((v) => {
-      resolvedVoiceName = v ? `${v.name} (${v.id})` : 'unresolved';
-      if (!v) log.error('cartesia', 'no voice resolved — calls will use the OpenAI voice');
+  /* Warm the cache for every language the dashboard offers, so the first call
+     in any language does not pay for the lookup. */
+  Promise.all(['EN', 'TL', 'TAGLISH', 'AR', 'HI'].map((l) =>
+    resolveVoiceFor(l).then((v) => [l, v ? `${v.name} [${v.code}]` : 'unresolved'])
+  ))
+    .then((pairs) => {
+      resolvedVoiceName = Object.fromEntries(pairs);
+      log.info('cartesia', 'voices ready', resolvedVoiceName);
     })
     .catch(() => { resolvedVoiceName = 'unresolved'; });
 }

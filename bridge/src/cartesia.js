@@ -21,6 +21,8 @@ const headers = () => ({
 });
 
 let cachedVoice = null;
+const voiceByLanguage = new Map();
+let voiceLibrary = null;
 
 /**
  * Walks the whole voice library. /voices is paginated, and the first page can
@@ -174,8 +176,8 @@ export class CartesiaStream {
   }
 
   async connect() {
-    this.voice = await resolveVoice();
-    if (!this.voice) throw new Error('no Cartesia voice available');
+    this.voice = await resolveVoiceFor(this.language);
+    if (!this.voice) throw new Error(`no Cartesia voice available for ${this.language}`);
 
     const url =
       `${config.cartesiaWsUrl}?api_key=${encodeURIComponent(config.cartesiaKey)}` +
@@ -273,7 +275,8 @@ export class CartesiaStream {
         encoding: 'pcm_mulaw',
         sample_rate: 8000,
       },
-      language: cartesiaLanguage(this.language),
+      /* Must match the voice: Sonic rejects a language its voice cannot speak. */
+      language: this.voice.code ?? cartesiaLanguage(this.language),
       context_id: this.contextId,
       continue: Boolean(more),
       add_timestamps: false,
@@ -299,10 +302,77 @@ export function cartesiaLanguage(key) {
   switch (key) {
     case 'AR': return 'ar';
     case 'HI': return 'hi';
-    /* Sonic has no Filipino; English carries Taglish acceptably because most
-       of the sentence frame is English anyway. */
-    case 'TL':
-    case 'TAGLISH':
+    /* Sonic does carry Tagalog voices, and a Tagalog voice handles the English
+       words inside Taglish far better than an English voice handles Tagalog. */
+    case 'TL': return config.langTl;
+    case 'TAGLISH': return config.langTaglish;
     default: return 'en';
+  }
+}
+
+/* A sensible warm, female-sounding default per language. Override any of them
+   with CARTESIA_VOICE_<LANG>; a voice must exist in that language or Sonic
+   rejects the request outright. */
+const DEFAULT_VOICE_BY_LANG = {
+  en: () => config.cartesiaVoiceName,
+  tl: () => config.voiceTl,
+  ar: () => config.voiceAr,
+  hi: () => config.voiceHi,
+};
+
+/**
+ * The voice to use for one call language. Sonic rejects a language its voice
+ * does not speak, so the voice and the language code must be chosen together —
+ * an English voice cannot simply be handed Arabic text.
+ */
+export async function resolveVoiceFor(languageKey) {
+  const code = cartesiaLanguage(languageKey);
+  if (voiceByLanguage.has(code)) return voiceByLanguage.get(code);
+
+  /* An explicit id overrides everything, but only for its own language. */
+  if (config.cartesiaVoiceId && code === 'en') {
+    const pinned = { id: config.cartesiaVoiceId, name: '(from CARTESIA_VOICE_ID)', language: 'en', code };
+    voiceByLanguage.set(code, pinned);
+    return pinned;
+  }
+
+  try {
+    voiceLibrary ??= await fetchAllVoices();
+    const inLang = voiceLibrary.filter(
+      (v) => String(v.language ?? '').toLowerCase() === code
+    );
+
+    if (!inLang.length) {
+      /* No voice speaks it — fall back to English rather than failing the call,
+         and say so, because the caller will hear the difference. */
+      log.warn('cartesia', `no ${code} voice on this account; falling back to English for ${languageKey}`);
+      const en = code === 'en' ? null : await resolveVoiceFor('EN');
+      const result = en ? { ...en, code: 'en', fellBackFrom: code } : null;
+      voiceByLanguage.set(code, result);
+      return result;
+    }
+
+    const wanted = String(DEFAULT_VOICE_BY_LANG[code]?.() ?? '').trim().toLowerCase();
+    const byName = wanted
+      ? inLang.find((v) => String(v.name ?? '').toLowerCase() === wanted)
+        ?? inLang.find((v) => String(v.name ?? '').toLowerCase().startsWith(wanted))
+        ?? inLang.find((v) => String(v.name ?? '').toLowerCase().includes(wanted))
+      : null;
+
+    const chosen = byName ?? inLang[0];
+    const result = {
+      id: chosen.id,
+      name: chosen.name,
+      language: chosen.language,
+      code,
+      source: byName ? `matched "${wanted}"` : `"${wanted}" not found — using ${chosen.name}`,
+      availableInLanguage: inLang.length,
+    };
+    voiceByLanguage.set(code, result);
+    log.info('cartesia', `${languageKey} (${code}) -> ${result.name} — ${result.source}`);
+    return result;
+  } catch (err) {
+    log.error('cartesia', `voice lookup failed for ${languageKey}: ${err.message}`);
+    return null;
   }
 }

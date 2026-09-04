@@ -30,6 +30,15 @@ export const config = {
   cartesiaWsUrl: read('CARTESIA_WS_URL', 'wss://api.cartesia.ai/tts/websocket'),
   /* Only sent when set — an unsupported control should not break synthesis. */
   cartesiaSpeed: read('CARTESIA_SPEED', ''),
+  /* Per-language voices — Sonic needs a voice that actually speaks the
+     language, so these are chosen alongside the language code. */
+  voiceTl: read('CARTESIA_VOICE_TL', 'Angel'),
+  voiceAr: read('CARTESIA_VOICE_AR', 'Rania'),
+  voiceHi: read('CARTESIA_VOICE_HI', 'Ishani'),
+  /* Tagalog voices exist, so Taglish uses one by default. Set to 'en' to read
+     Taglish with an English voice instead. */
+  langTl: read('CARTESIA_LANG_TL', 'tl'),
+  langTaglish: read('CARTESIA_LANG_TAGLISH', 'tl'),
 
   /* Hard stop so a stuck call can never bill forever. */
   maxCallSeconds: Number(read('MAX_CALL_SECONDS', '600')),
