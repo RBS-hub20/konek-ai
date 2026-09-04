@@ -5,6 +5,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { PhoneCall, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Input';
+import dynamic from 'next/dynamic';
+import { DEFAULT_COUNTRY, type PhoneValue } from '@/components/ui/phoneTypes';
+
+/* The phone metadata is ~40kB and only matters once this dialog is open, so
+   it is fetched on demand rather than shipped with the dashboard. */
+const PhoneInput = dynamic(() => import('@/components/ui/PhoneInput').then((m) => m.PhoneInput), {
+  ssr: false,
+  loading: () => <div className="h-10 rounded-brand border border-line bg-surface" />,
+});
 import { Badge } from '@/components/ui/Badge';
 import { api, type PlaceCallResult } from '@/lib/apiClient';
 import { needsUnlock, useKonekStore } from '@/lib/store';
@@ -25,7 +34,7 @@ export function TestCallDialog({
   language?: LanguageKey;
 }) {
   const { businessId, business, liveCallsEnabled, refreshSession, loadCalls, loadOverview } = useKonekStore();
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState<PhoneValue>({ e164: null, country: DEFAULT_COUNTRY, valid: false });
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +50,8 @@ export function TestCallDialog({
   }, [open, refreshSession]);
 
   const place = async () => {
-    const to = phone.trim();
-    if (!to) return;
+    const to = phone.e164;
+    if (!to || !phone.valid) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -106,20 +115,30 @@ export function TestCallDialog({
               </div>
 
               <div className="mt-6 space-y-4">
-                <Field label="Your phone number" hint="International format, e.g. +971501184402 or +639171234567">
-                  <Input
-                    value={phone}
-                    autoFocus
-                    onChange={(e) => setPhone(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && place()}
-                    placeholder="+971 50 118 4402"
-                    inputMode="tel"
-                  />
+                <Field
+                  label="Your phone number"
+                  hint={
+                    phone.e164 && !phone.valid
+                      ? 'That does not look like a valid number for this country yet.'
+                      : 'Pick your country, then type the number as you would locally.'
+                  }
+                >
+                  <PhoneInput value={phone} onChange={setPhone} autoFocus onEnter={place} />
                 </Field>
                 <Field label="Your name (optional)">
                   <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Renmar" />
                 </Field>
               </div>
+
+              {/* Exactly what will be dialled, in the format Twilio receives. */}
+              {phone.e164 && phone.valid && (
+                <p className="mt-4 text-[12px] leading-relaxed text-muted">
+                  Calling <span className="tabular-nums text-ink">{phone.e164}</span>
+                  {business?.outbound_number && (
+                    <> from <span className="tabular-nums text-ink">{business.outbound_number}</span></>
+                  )}
+                </p>
+              )}
 
               {!liveCallsEnabled && (
                 <p className="mt-4 rounded-brand border border-line bg-surface p-3 text-[12px] leading-relaxed text-muted">
@@ -146,7 +165,7 @@ export function TestCallDialog({
               )}
 
               <div className="mt-6 flex gap-2">
-                <Button size="sm" onClick={place} disabled={busy || !phone.trim()}>
+                <Button size="sm" onClick={place} disabled={busy || !phone.valid}>
                   {busy ? 'Calling…' : result ? 'Call again' : 'Call me now'}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
