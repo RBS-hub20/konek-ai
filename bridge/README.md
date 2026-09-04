@@ -22,8 +22,22 @@ OpenAI accepts — so nothing is resampled and latency stays conversational.
 
 1. [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**
    → pick `konek-ai`.
-2. **Settings → Root Directory:** `bridge`
-   (without this Railway builds the Next.js app instead.)
+2. **Settings → Root Directory:** type exactly `bridge` — no leading slash,
+   no trailing slash. Without it Railway builds the Next.js app instead.
+
+   Leave **Builder** on *Nixpacks* (the default). `bridge/nixpacks.toml` and
+   `bridge/railway.json` pin the whole plan:
+
+   ```
+   install  npm ci --omit=dev
+   build    node --check src/server.js
+   start    node src/server.js
+   ```
+
+   There is deliberately **no Dockerfile in `bridge/`** — Railway auto-detects
+   one and would use it instead of Nixpacks, conflicting with the declared
+   builder and failing the image build. The container build lives at
+   `bridge/deploy/Dockerfile` for Fly.io.
 3. **Variables** — add three:
 
    | Variable | Value |
@@ -70,7 +84,7 @@ Remove the variable and it falls straight back to the spoken opener.
 
 ```bash
 cd bridge
-fly launch --no-deploy          # fly.toml is already here
+fly launch --no-deploy          # fly.toml already points at deploy/Dockerfile
 fly secrets set OPENAI_API_KEY=... KONEK_API_SECRET=... KONEK_APP_URL=https://konek-ai.vercel.app
 fly deploy
 ```
@@ -115,3 +129,18 @@ generic fallback agent that states no business facts.
 `wss://`, and the Railway domain must be public.
 
 **Call cuts off at 10 minutes** — that is `MAX_CALL_SECONDS`. Raise it.
+
+## If the Railway build fails
+
+Read the first red line in **Deployments → the failed build → View logs**, then:
+
+| What the log says | Fix |
+| --- | --- |
+| It is installing `next`, `react`, `tailwind` | Root Directory is not set. Set it to `bridge`. |
+| `Dockerfile` / `failed to solve` | A Dockerfile is being detected at the service root. There should not be one — confirm `bridge/Dockerfile` does not exist and that the build is on Nixpacks. |
+| `npm ci` … `lock file` out of sync | `package-lock.json` is stale. Run `npm install` in `bridge/` and commit it. |
+| `Cannot find module 'ws'` | The install phase was skipped. Check `railway.json` still has `buildCommand`. |
+| Nothing obvious, fails in seconds | Settings → Build → turn **vulnerability scanning** off and redeploy. |
+
+The build has no compile step, so almost every failure here is configuration
+rather than code.

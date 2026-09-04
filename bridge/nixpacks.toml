@@ -1,0 +1,16 @@
+# Explicit build plan for Railway. Without this Nixpacks infers everything,
+# and an inferred plan is one more thing that can change under you.
+providers = ["node"]
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci --omit=dev"]
+
+# No build step: the bridge is plain ESM JavaScript and runs as-is.
+[phases.build]
+cmds = ["node --check src/server.js"]
+
+[start]
+cmd = "node src/server.js"

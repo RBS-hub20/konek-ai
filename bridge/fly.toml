@@ -3,7 +3,7 @@ app = "konek-ai-bridge"
 primary_region = "sin"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "deploy/Dockerfile"
 
 [http_service]
   internal_port = 8080
