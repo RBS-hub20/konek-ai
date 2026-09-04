@@ -26,7 +26,11 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/voices') {
     if (!config.cartesiaKey) return json(res, 400, { error: 'CARTESIA_API_KEY is not set' });
     try {
-      return json(res, 200, { voices: await listVoices(Number(url.searchParams.get('limit') ?? 40)) });
+      return json(res, 200, await listVoices({
+        limit: Number(url.searchParams.get('limit') ?? 60),
+        language: url.searchParams.get('language'),
+        search: url.searchParams.get('search'),
+      }));
     } catch (err) {
       return json(res, 502, { error: 'Could not list voices', detail: err.message });
     }

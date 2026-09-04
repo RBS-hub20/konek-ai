@@ -23,9 +23,44 @@ const headers = () => ({
 let cachedVoice = null;
 
 /**
+ * Walks the whole voice library. /voices is paginated, and the first page can
+ * easily contain no English voices at all, so anything that only looks at page
+ * one will fail to find the voice it was asked for.
+ */
+export async function fetchAllVoices(maxPages = 12) {
+  const all = [];
+  let startingAfter = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = new URL(`${REST}/voices/`);
+    url.searchParams.set('limit', '100');
+    if (startingAfter) url.searchParams.set('starting_after', startingAfter);
+
+    const res = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(12_000) });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`${res.status} ${body.slice(0, 200)}`);
+    }
+    const payload = await res.json();
+    const batch = Array.isArray(payload) ? payload : (payload.data ?? []);
+    if (!batch.length) break;
+    all.push(...batch);
+
+    const hasMore = Array.isArray(payload) ? batch.length === 100 : Boolean(payload.has_more);
+    if (!hasMore) break;
+    startingAfter = batch[batch.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+  return all;
+}
+
+const isEnglish = (v) => String(v.language ?? '').toLowerCase().startsWith('en');
+
+/**
  * Finds the configured voice. An explicit CARTESIA_VOICE_ID wins; otherwise the
- * voice list is searched for CARTESIA_VOICE_NAME (default "Skylar"), falling
- * back to any English voice so a name change degrades instead of failing.
+ * library is searched for CARTESIA_VOICE_NAME (default "Skylar"). If that name
+ * does not exist on the account, any English voice is used rather than failing
+ * the call — the fallback is logged so it is never a silent substitution.
  */
 export async function resolveVoice() {
   if (cachedVoice) return cachedVoice;
@@ -36,32 +71,32 @@ export async function resolveVoice() {
   }
 
   try {
-    const res = await fetch(`${REST}/voices/`, {
-      headers: headers(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`${res.status} ${body.slice(0, 200)}`);
-    }
-    const payload = await res.json();
-    const voices = Array.isArray(payload) ? payload : (payload.data ?? []);
-    if (!voices.length) throw new Error('the voice list came back empty');
+    const voices = await fetchAllVoices();
+    if (!voices.length) throw new Error('the voice library came back empty');
 
-    const wanted = config.cartesiaVoiceName.toLowerCase();
-    const byName = voices.find((v) => String(v.name ?? '').toLowerCase() === wanted)
-      ?? voices.find((v) => String(v.name ?? '').toLowerCase().includes(wanted));
+    const wanted = config.cartesiaVoiceName.trim().toLowerCase();
+    const byName =
+      voices.find((v) => String(v.name ?? '').toLowerCase() === wanted) ??
+      voices.find((v) => String(v.name ?? '').toLowerCase().startsWith(wanted)) ??
+      voices.find((v) => String(v.name ?? '').toLowerCase().includes(wanted));
 
-    const chosen = byName
-      ?? voices.find((v) => String(v.language ?? '').startsWith('en'))
-      ?? voices[0];
+    const english = voices.filter(isEnglish);
+    const chosen = byName ?? english[0] ?? voices[0];
 
     cachedVoice = {
       id: chosen.id,
       name: chosen.name ?? 'unknown',
-      source: byName ? 'matched by name' : `"${config.cartesiaVoiceName}" not found — fell back to ${chosen.name}`,
+      language: chosen.language,
+      source: byName
+        ? `matched "${config.cartesiaVoiceName}"`
+        : `"${config.cartesiaVoiceName}" is not on this account — using ${chosen.name}`,
+      englishAvailable: english.length,
+      totalVoices: voices.length,
     };
     log.info('cartesia', `voice: ${cachedVoice.name} (${cachedVoice.id}) — ${cachedVoice.source}`);
+    if (!byName) {
+      log.warn('cartesia', `set CARTESIA_VOICE_NAME or CARTESIA_VOICE_ID to pick deliberately; ${english.length} English voices available`);
+    }
     return cachedVoice;
   } catch (err) {
     log.error('cartesia', `could not resolve a voice: ${err.message}`);
@@ -69,13 +104,18 @@ export async function resolveVoice() {
   }
 }
 
-/** For diagnostics: the first page of available voices. */
-export async function listVoices(limit = 40) {
-  const res = await fetch(`${REST}/voices/`, { headers: headers(), signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
-  const payload = await res.json();
-  const voices = Array.isArray(payload) ? payload : (payload.data ?? []);
-  return voices.slice(0, limit).map((v) => ({ id: v.id, name: v.name, language: v.language }));
+/** For diagnostics: the voice library, optionally filtered by language. */
+export async function listVoices({ limit = 60, language = null, search = null } = {}) {
+  let voices = await fetchAllVoices();
+  if (language) voices = voices.filter((v) => String(v.language ?? '').toLowerCase().startsWith(language.toLowerCase()));
+  if (search) {
+    const q = search.toLowerCase();
+    voices = voices.filter((v) => String(v.name ?? '').toLowerCase().includes(q));
+  }
+  return {
+    total: voices.length,
+    voices: voices.slice(0, limit).map((v) => ({ id: v.id, name: v.name, language: v.language })),
+  };
 }
 
 /* ── Prosody shaping ─────────────────────────────────────────────── */
