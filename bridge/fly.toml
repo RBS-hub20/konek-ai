@@ -2,8 +2,9 @@
 app = "konek-ai-bridge"
 primary_region = "sin"
 
-[build]
-  dockerfile = "deploy/Dockerfile"
+# No [build] section: `fly launch` detects the Node app and generates its own
+# Dockerfile. A Dockerfile is deliberately not kept in this folder — Railway
+# auto-detects one in the service root and would use it instead of Nixpacks.
 
 [http_service]
   internal_port = 8080
