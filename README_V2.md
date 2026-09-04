@@ -66,11 +66,10 @@ your price range → goal → active skills → Business Brain → guardrails.
 
 ## Known gaps
 
-**The call is not a conversation yet.** `/api/call` really dials from your
-number and speaks an opener in the chosen vibe, then hangs up. Two-way dialogue
-needs a media-stream bridge (Twilio audio ⇄ Deepgram ⇄ LLM ⇄ Cartesia) running
-as a long-lived websocket process — Vercel functions cannot hold one. The prompt,
-brain, skills, logging and webhooks are all wired and waiting for it.
+**Two-way conversation needs the bridge deployed.** `./bridge` is a standalone
+websocket service (Railway or Fly) that connects Twilio's audio to OpenAI's
+realtime API. Until `MEDIA_STREAM_URL` is set in Vercel, calls speak the opener
+and hang up. See [bridge/README.md](./bridge/README.md).
 
 **No authentication.** The API trusts `businessId` from the caller, so anyone who
 finds the URL can read or write any tenant. `/super-admin` is not restricted to

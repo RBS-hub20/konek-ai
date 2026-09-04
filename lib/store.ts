@@ -6,6 +6,7 @@ import type {
   Business, BusinessBrain, CallLog, Campaign, OverviewStats, SkillRecord,
 } from './types2';
 import { vibeToKey, type VibeKey } from './types2';
+import { languageToKey, type LanguageKey } from './ai/languages';
 
 /* Single source of truth for the dashboard. Everything here comes from the
    API — there is no mock data left in the client. */
@@ -55,9 +56,11 @@ interface KonekState {
   calls: CallLog[];
   loadCalls: () => Promise<void>;
 
-  /* Vibe */
+  /* Vibe & language */
   vibe: VibeKey;
   setVibe: (v: string) => Promise<void>;
+  language: LanguageKey;
+  setLanguage: (l: string) => Promise<void>;
 }
 
 const EMPTY_STATS: OverviewStats = { callsToday: 0, connectedPct: 0, hotLeads: 0, bookings: 0 };
@@ -82,6 +85,7 @@ export const useKonekStore = create<KonekState>()((set, get) => ({
       business,
       businessId: business.id,
       vibe: vibeToKey(business.active_vibe),
+      language: languageToKey(business.language),
       unlocked: session?.unlocked ?? false,
       unlockRequired: session?.unlockRequired ?? false,
       liveCallsEnabled: session?.liveCallsEnabled ?? false,
@@ -105,7 +109,7 @@ export const useKonekStore = create<KonekState>()((set, get) => ({
     set({ business: previous ? { ...previous, ...patch } : previous }); // optimistic
     try {
       const { business } = await api.updateBusiness(id, patch);
-      set({ business, vibe: vibeToKey(business.active_vibe) });
+      set({ business, vibe: vibeToKey(business.active_vibe), language: languageToKey(business.language) });
     } catch {
       set({ business: previous }); // put it back
       throw new Error('Could not save. Check your connection and try again.');
@@ -212,6 +216,13 @@ export const useKonekStore = create<KonekState>()((set, get) => ({
     const vibe = vibeToKey(v);
     set({ vibe });
     await get().setBusinessField({ active_vibe: vibe });
+  },
+
+  language: 'EN',
+  setLanguage: async (l) => {
+    const language = languageToKey(l);
+    set({ language });
+    await get().setBusinessField({ language });
   },
 }));
 

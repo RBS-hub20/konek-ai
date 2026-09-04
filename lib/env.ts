@@ -28,6 +28,9 @@ export const env = {
   openaiKey: read('OPENAI_API_KEY'),
 
   apiSecret: read('KONEK_API_SECRET'),
+  /* wss:// URL of the Railway/Fly media-stream bridge. When set, calls become
+     two-way conversations instead of a one-way spoken opener. */
+  mediaStreamUrl: read('MEDIA_STREAM_URL'),
   appUrl: resolveAppUrl(),
 };
 
@@ -62,6 +65,7 @@ export const hasCartesia = Boolean(env.cartesiaKey);
 export const hasDeepgram = Boolean(env.deepgramKey);
 export const hasStripe = Boolean(env.stripeSecret);
 export const hasOpenAI = Boolean(env.openaiKey);
+export const hasMediaBridge = Boolean(env.mediaStreamUrl);
 
 /** What the API reports back so the UI can show what is live. */
 export function serviceStatus() {
@@ -72,6 +76,7 @@ export function serviceStatus() {
     deepgram: hasDeepgram,
     stripe: hasStripe,
     openai: hasOpenAI,
+    mediaBridge: hasMediaBridge,
   };
 }
 
@@ -93,6 +98,14 @@ export function configWarnings(): string[] {
     w.push(
       `NEXT_PUBLIC_APP_URL is not set — falling back to ${env.appUrl}. Set it to your production domain so Twilio callbacks and Stripe redirects are stable across deployments.`
     );
+  }
+  if (hasTwilio && !hasMediaBridge) {
+    w.push(
+      'MEDIA_STREAM_URL is not set — calls speak the opener and hang up. Deploy the bridge in ./bridge and set it to wss://<your-app>/media-stream for two-way conversation.'
+    );
+  }
+  if (hasMediaBridge && !/^wss:\/\//.test(env.mediaStreamUrl)) {
+    w.push(`MEDIA_STREAM_URL must start with wss:// — got "${env.mediaStreamUrl}".`);
   }
   if (hasTwilio && env.appUrl.includes('localhost')) {
     w.push('NEXT_PUBLIC_APP_URL points at localhost — Twilio cannot reach it. Use a public URL (ngrok locally).');

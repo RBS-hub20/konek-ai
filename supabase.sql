@@ -39,6 +39,7 @@ alter table businesses add column if not exists outbound_number text;
 alter table businesses add column if not exists phone_number    text;   -- alias
 alter table businesses add column if not exists vibe            text default 'PRO_CLOSER';
 alter table businesses add column if not exists active_vibe     text default 'PRO_CLOSER';
+alter table businesses add column if not exists language        text default 'EN';   -- EN | TL | TAGLISH | AR | HI
 alter table businesses add column if not exists goal            text default 'Book';
 alter table businesses add column if not exists what_you_sell   text;
 alter table businesses add column if not exists industry        text;
@@ -139,6 +140,7 @@ alter table call_logs add column if not exists from_number      text;
 alter table call_logs add column if not exists customer_name    text;
 alter table call_logs add column if not exists name             text;   -- alias
 alter table call_logs add column if not exists vibe             text;
+alter table call_logs add column if not exists language         text;
 alter table call_logs add column if not exists status           text default 'Initiated';
 alter table call_logs add column if not exists transcript       text;
 alter table call_logs add column if not exists recording_url    text;
@@ -252,10 +254,10 @@ on conflict (id) do nothing;
 -- ── 13 · Default tenant, if there is none ───────────────────────────
 insert into businesses (name, slug, owner_email, outbound_number, phone_number,
                         plan, calls_used, calls_limit, status, mrr, vibe, active_vibe,
-                        what_you_sell, goal)
+                        language, what_you_sell, goal)
 select 'Nova Aesthetics', 'nova-aesthetics', 'owner@konek.ai', '+12232263852', '+12232263852',
        'pro', 0, 2000, 'active', 149, 'PRO_CLOSER', 'PRO_CLOSER',
-       'Skin treatments, facials and aftercare packages', 'Book'
+       'EN', 'Skin treatments, facials and aftercare packages', 'Book'
 where not exists (select 1 from businesses);
 
 insert into business_brain (business_id, business_name, what_you_sell, price_range, goal)

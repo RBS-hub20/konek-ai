@@ -1,5 +1,7 @@
-import type { Business, BusinessBrain, SkillRecord } from '@/lib/types2';
+import type { Business, BusinessBrain, SkillRecord, VibeKey } from '@/lib/types2';
+import { vibeToKey } from '@/lib/types2';
 import { vibeConfig } from './vibes';
+import { languageConfig, languageToKey, openerFor } from './languages';
 
 const GOAL_LINE: Record<string, string> = {
   Explain: 'Your goal on this call is to ANSWER questions and educate. Do not push for a sale.',
@@ -12,6 +14,8 @@ export interface CallPromptInput {
   brain: BusinessBrain | null;
   skills: SkillRecord[];
   vibe: string;
+  /** EN | TL | TAGLISH | AR | HI — defaults to the business setting. */
+  language?: string;
   chunks?: { content: string; source_name: string | null }[];
   customerName?: string | null;
 }
@@ -21,9 +25,10 @@ export interface CallPromptInput {
  * ONLY source of facts, so KAI cannot invent prices, hours or policies.
  */
 export function buildCallPrompt({
-  business, brain, skills, vibe, chunks = [], customerName,
+  business, brain, skills, vibe, language, chunks = [], customerName,
 }: CallPromptInput): string {
   const v = vibeConfig(vibe);
+  const lang = languageConfig(language ?? business.language);
   const name = brain?.business_name || business.name;
   const parts: string[] = [];
 
@@ -32,6 +37,9 @@ export function buildCallPrompt({
       customerName ? ` named ${customerName}` : ''
     }. Speak naturally, one thought at a time. Do not mention that you are an AI unless asked directly.`
   );
+
+  /* Language comes first: it governs every other instruction below. */
+  parts.push(`## LANGUAGE — ${lang.label}\n${lang.instruction}\nIf the customer switches language, follow them.`);
 
   parts.push(`## VOICE & TONE — ${v.label}\n${v.style}`);
 
@@ -74,19 +82,19 @@ export function buildCallPrompt({
   return parts.join('\n\n');
 }
 
-/** Opening line spoken when the customer picks up. */
-export function buildOpener(business: Business, brain: BusinessBrain | null, vibe: string, customerName?: string | null): string {
-  const v = vibeConfig(vibe);
+/** Opening line spoken when the customer picks up, in the chosen language. */
+export function buildOpener(
+  business: Business,
+  brain: BusinessBrain | null,
+  vibe: string,
+  customerName?: string | null,
+  language?: string
+): string {
   const name = brain?.business_name || business.name;
-  const who = customerName ? `${customerName}, ` : '';
-  switch (v.label) {
-    case 'FRIENDLY TITO':
-      return `Hello po ${who}si Kai ito from ${name}. Kumusta po kayo? May quick question lang po ako, okay lang po ba?`;
-    case 'GEN-Z HYPE':
-      return `Hey ${who}it's Kai from ${name}! Got like thirty seconds? I've got something you're gonna want to hear.`;
-    case 'CALM CARE':
-      return `Hi ${who}this is Kai calling from ${name}. I hope I'm not catching you at a bad time — do you have a moment?`;
-    default:
-      return `Hi ${who}this is Kai from ${name}. I'll be quick — do you have a moment?`;
-  }
+  return openerFor(
+    vibeToKey(vibe) as VibeKey,
+    languageToKey(language ?? business.language),
+    name,
+    customerName ?? null
+  );
 }

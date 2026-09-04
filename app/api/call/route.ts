@@ -5,7 +5,8 @@ import {
 import { buildCallPrompt, buildOpener } from '@/lib/ai/callPrompt';
 import { vibeConfig } from '@/lib/ai/vibes';
 import { vibeToKey } from '@/lib/types2';
-import { env, hasTwilio, hasCartesia, hasDeepgram } from '@/lib/env';
+import { env, hasTwilio, hasCartesia, hasDeepgram, hasMediaBridge } from '@/lib/env';
+import { languageConfig, languageToKey } from '@/lib/ai/languages';
 import { guardCall, isValidPhone, toE164 } from '@/lib/server/operator';
 import { SCHEMA_HINT } from '@/lib/server/resilient';
 import { describeError, fail, handle, ok, readJson } from '@/lib/server/http';
@@ -26,6 +27,8 @@ interface CallBody {
   campaignId?: string;
   contact_id?: string;
   vibe?: string;
+  /** EN | TL | TAGLISH | AR | HI */
+  language?: string;
   skills?: string[];
   dryRun?: boolean;
 }
@@ -97,6 +100,7 @@ export async function POST(req: Request) {
   const campaignId = body.campaign_id ?? body.campaignId ?? null;
   const campaign = campaignId ? await safe(() => getCampaign(campaignId), null) : null;
   const vibe = vibeToKey(body.vibe ?? campaign?.vibe ?? business.active_vibe ?? 'PRO_CLOSER');
+  const language = languageToKey(body.language ?? business.language);
 
   const brain = await safe<BusinessBrain | null>(() => getBrain(business.id), null);
   const allSkills = await safe<SkillRecord[]>(() => listSkills(business.id), []);
@@ -106,14 +110,21 @@ export async function POST(req: Request) {
     ? allSkills.filter((s) => wanted.includes(s.id))
     : allSkills.filter((s) => s.is_active);
 
-  const systemPrompt = buildCallPrompt({ business, brain, skills, vibe, customerName });
-  const opener = buildOpener(business, brain, vibe, customerName);
+  const systemPrompt = buildCallPrompt({ business, brain, skills, vibe, language, customerName });
+  const opener = buildOpener(business, brain, vibe, customerName, language);
 
   if (body.dryRun) {
     return ok({
-      dryRun: true, business: business.name, from, to: phone, vibe,
+      dryRun: true, business: business.name, from, to: phone, vibe, language,
+      mode: hasMediaBridge ? 'conversation' : 'opener-only',
       skillsUsed: skills.map((s) => s.id), goal: brain?.goal ?? 'Book',
       promptChars: systemPrompt.length, opener, systemPrompt,
+      /* Exactly what Twilio will execute — inspect it without dialling. */
+      twiml: buildTwiml({
+        opener, vibe, language,
+        businessId: ephemeral ? '' : business.id,
+        campaignId,
+      }),
       ...(warnings.length ? { warnings } : {}),
     });
   }
@@ -130,7 +141,7 @@ export async function POST(req: Request) {
       const call = await client.calls.create({
         to: phone,
         from: from!,
-        twiml: buildTwiml(opener, vibe),
+        twiml: buildTwiml({ opener, vibe, language, businessId: ephemeral ? '' : business.id, campaignId }),
         statusCallback: `${env.appUrl}/api/call/transcript`,
         statusCallbackEvent: ['initiated', 'answered', 'completed'],
         statusCallbackMethod: 'POST',
@@ -167,6 +178,15 @@ export async function POST(req: Request) {
     warnings.push('Twilio is not configured — the call was logged but nobody was dialled.');
   }
 
+  if (hasTwilio && !hasMediaBridge) {
+    warnings.push(
+      'MEDIA_STREAM_URL is not set, so this call speaks the opener and hangs up. Deploy the bridge in ./bridge for a two-way conversation.'
+    );
+  }
+  if (hasMediaBridge && languageConfig(language).fallbackApproximate === undefined) {
+    /* no-op: kept so the language import is always exercised */
+  }
+
   /* ── 4 · Record it — best effort, after the phone is already ringing ── */
   const logged = await safe(
     () => logCall({
@@ -177,6 +197,7 @@ export async function POST(req: Request) {
       from_number: from ?? null,
       customer_name: customerName,
       vibe,
+      language,
       status,
       skills_used: skills.map((s) => s.id),
       twilio_sid: twilioSid,
@@ -205,6 +226,8 @@ export async function POST(req: Request) {
       from,
       to: phone,
       vibe,
+      language,
+      mode: hasMediaBridge ? 'conversation' : 'opener-only',
       business: business.name,
       skillsUsed: skills.map((s) => s.id),
       promptChars: systemPrompt.length,
@@ -218,21 +241,66 @@ export async function POST(req: Request) {
 /**
  * TwiML executed when the customer answers.
  *
- * Without a media-stream bridge this speaks the opener in a voice matched to
- * the vibe, then hangs up. Replace with <Connect><Stream/></Connect> once the
- * websocket bridge exists.
+ * With MEDIA_STREAM_URL set, the call is handed to the media bridge over a
+ * websocket and becomes a real two-way conversation that lasts until someone
+ * hangs up. Without it, we fall back to speaking the opener and hanging up,
+ * so a missing bridge degrades rather than breaks.
  */
-function buildTwiml(opener: string, vibe: string): string {
+function buildTwiml(opts: {
+  opener: string;
+  vibe: string;
+  language: string;
+  businessId: string;
+  campaignId: string | null;
+}): string {
+  const { opener, vibe, language, businessId, campaignId } = opts;
+
+  if (hasMediaBridge) {
+    /* Parameters ride along so the bridge knows which tenant, vibe and
+       language this call belongs to before the first audio frame. */
+    const params = [
+      ['businessId', businessId],
+      ['vibe', vibe],
+      ['language', language],
+      ['campaignId', campaignId ?? ''],
+    ]
+      .filter(([, v]) => v)
+      .map(([k, v]) => `<Parameter name="${k}" value="${escapeXml(String(v))}"/>`)
+      .join('');
+
+    return (
+      `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<Response>` +
+      `<Connect>` +
+      `<Stream url="${escapeXml(env.mediaStreamUrl)}">${params}</Stream>` +
+      `</Connect>` +
+      `</Response>`
+    );
+  }
+
   const v = vibeConfig(vibe);
+  const lang = languageConfig(language);
+  /* Arabic and Hindi have real Polly voices; Tagalog does not, so the fallback
+     reads Taglish with an English voice. The bridge removes this limitation. */
+  const voice = lang.key === 'EN' ? v.twilioVoice : lang.twilioVoice;
+
   return (
     `<?xml version="1.0" encoding="UTF-8"?>` +
     `<Response>` +
-    `<Say voice="${v.twilioVoice}">${escapeXml(opener)}</Say>` +
+    `<Say voice="${voice}" language="${lang.twilioLang}">${escapeXml(opener)}</Say>` +
     `<Pause length="1"/>` +
-    `<Say voice="${v.twilioVoice}">${escapeXml('Thanks for taking my call. Someone from the team will follow up shortly. Have a great day!')}</Say>` +
+    `<Say voice="${voice}" language="${lang.twilioLang}">${escapeXml(CLOSING[lang.key])}</Say>` +
     `</Response>`
   );
 }
+
+const CLOSING: Record<string, string> = {
+  EN: 'Thanks for taking my call. Someone from the team will follow up shortly. Have a great day!',
+  TL: 'Maraming salamat po sa oras ninyo. May susunod pong tatawag mula sa team namin. Ingat po kayo!',
+  TAGLISH: 'Thank you po sa time ninyo. May mag-follow up po sa inyo from our team. Ingat po!',
+  AR: 'شكراً لوقتك. سيتواصل معك أحد أفراد الفريق قريباً. أتمنى لك يوماً سعيداً!',
+  HI: 'आपके समय के लिए धन्यवाद। हमारी टीम से कोई जल्द ही संपर्क करेगा। आपका दिन शुभ हो!',
+};
 
 /** Turns the common Twilio error codes into something actionable. */
 function twilioHint(code: number | string | undefined | null): string | undefined {

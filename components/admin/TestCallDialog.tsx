@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { api, type PlaceCallResult } from '@/lib/apiClient';
 import { needsUnlock, useKonekStore } from '@/lib/store';
 import { vibeToLabel } from '@/lib/types2';
+import { LANGUAGES, type LanguageKey } from '@/lib/ai/languages';
 import { UnlockDialog } from './UnlockDialog';
 
 /** "Test call myself" — dials the number you type, in the selected vibe. */
@@ -16,10 +17,12 @@ export function TestCallDialog({
   open,
   onClose,
   vibe,
+  language = 'EN',
 }: {
   open: boolean;
   onClose: () => void;
   vibe: string;
+  language?: LanguageKey;
 }) {
   const { businessId, business, liveCallsEnabled, refreshSession, loadCalls, loadOverview } = useKonekStore();
   const [phone, setPhone] = useState('');
@@ -48,6 +51,7 @@ export function TestCallDialog({
         to,
         customerName: name.trim() || undefined,
         vibe,
+        language,
         business_id: businessId ?? undefined,
       });
       setResult(res as PlaceCallResult);
@@ -91,7 +95,8 @@ export function TestCallDialog({
                   <div>
                     <h3 className="font-display text-[15px] font-semibold text-ink">Test call myself</h3>
                     <p className="mt-0.5 text-[11px] text-muted">
-                      {vibeToLabel(vibe)} · from {business?.outbound_number ?? 'your Twilio number'}
+                      {vibeToLabel(vibe)} · {LANGUAGES[language].label} · from{' '}
+                      {business?.outbound_number ?? 'your Twilio number'}
                     </p>
                   </div>
                 </div>

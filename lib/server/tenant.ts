@@ -44,6 +44,7 @@ function mem(): Mem {
         outbound_number: env.twilioNumber || '+12232263852',
         plan: 'pro', calls_used: 0, calls_limit: 2000, status: 'active', mrr: 149,
         active_vibe: 'PRO_CLOSER',
+        language: 'EN',
         settings: { whatsapp_followup: true, sms_fallback: true },
         created_at: nowIso(),
       }],
@@ -82,6 +83,7 @@ const normalizeBusiness = (b: Record<string, unknown>): Business => ({
   status: (b.status as string) ?? 'active',
   mrr: Number(b.mrr ?? 0),
   active_vibe: (b.active_vibe as string) ?? 'PRO_CLOSER',
+  language: (b.language as string) ?? 'EN',
   settings: (b.settings as Business['settings']) ?? {},
   created_at: (b.created_at as string) ?? nowIso(),
 });
@@ -110,7 +112,7 @@ export async function getBusiness(id?: string | null): Promise<Business | null> 
 export async function updateBusiness(id: string, patch: Partial<Business>): Promise<Business> {
   const allowed = [
     'name', 'slug', 'owner_email', 'owner_name', 'outbound_number', 'plan',
-    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'settings',
+    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'settings',
   ] as const;
   const clean: Record<string, unknown> = {};
   for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
@@ -140,6 +142,7 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     status: input.status ?? 'active',
     mrr: input.mrr ?? (input.plan === 'pro' ? 149 : input.plan === 'enterprise' ? 2400 : 49),
     active_vibe: input.active_vibe ?? 'PRO_CLOSER',
+    language: input.language ?? 'EN',
     settings: input.settings ?? { whatsapp_followup: true, sms_fallback: true },
   };
   if (!hasSupabase) {
@@ -622,6 +625,7 @@ function fallbackBusiness(): Business {
     status: 'active',
     mrr: 149,
     active_vibe: 'PRO_CLOSER',
+    language: 'EN',
     settings: { whatsapp_followup: true, sms_fallback: true },
     created_at: nowIso(),
   };
@@ -733,6 +737,7 @@ export async function resolveBusinessForCall(id?: string | null): Promise<Resolv
       mrr: seed.mrr,
       active_vibe: 'PRO_CLOSER',
       vibe: 'PRO_CLOSER',
+      language: 'EN',
       settings: seed.settings,
     }
   );
@@ -767,6 +772,7 @@ export async function logCall(row: {
   from_number?: string | null;
   customer_name?: string | null;
   vibe?: string | null;
+  language?: string | null;
   status?: string;
   skills_used?: string[];
   twilio_sid?: string | null;
@@ -801,6 +807,7 @@ export async function logCall(row: {
       customer_name: row.customer_name ?? null,
       name: row.customer_name ?? null,
       vibe: row.vibe ?? null,
+      language: row.language ?? null,
       status: row.status ?? 'Initiated',
       skills_used: row.skills_used ?? [],
       duration_seconds: 0,

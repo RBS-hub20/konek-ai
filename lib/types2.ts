@@ -33,6 +33,7 @@ export interface Business {
   status: string;
   mrr: number;
   active_vibe: string;
+  language: string;
   settings: BusinessSettings;
   created_at: string;
 }

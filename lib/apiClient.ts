@@ -114,8 +114,8 @@ export const api = {
   calls: (businessId?: string, limit = 100) =>
     req<{ calls: CallLog[] }>(`/api/call?limit=${limit}${businessId ? `&businessId=${businessId}` : ''}`),
   placeCall: (input: {
-    to: string; customerName?: string; vibe?: string; business_id?: string;
-    campaign_id?: string; skills?: string[]; dryRun?: boolean;
+    to: string; customerName?: string; vibe?: string; language?: string;
+    business_id?: string; campaign_id?: string; skills?: string[]; dryRun?: boolean;
   }) => req<PlaceCallResult & Partial<DryRunResult>>('/api/call', { method: 'POST', body: JSON.stringify(input) }),
 
   /* Integrations */
