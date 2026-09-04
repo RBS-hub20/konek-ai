@@ -1,5 +1,6 @@
 import {
-  getBrain, getBusiness, listCallLogs, listCampaigns, listSkills, overviewStats,
+  getBrain, listCallLogs, listCampaigns, listSkills, overviewStats,
+  resolveBusinessForCall, safe,
 } from '@/lib/server/tenant';
 import { handle } from '@/lib/server/http';
 
@@ -10,7 +11,7 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const businessId = new URL(req.url).searchParams.get('businessId');
   return handle(async () => {
-    const business = await getBusiness(businessId);
+    const { business, ephemeral } = await resolveBusinessForCall(businessId);
     if (!business) {
       return {
         business: null,
@@ -20,15 +21,16 @@ export async function GET(req: Request) {
     }
 
     const [stats, recentCalls, campaigns, skills, brain] = await Promise.all([
-      overviewStats(business.id),
-      listCallLogs(business.id, 10),
-      listCampaigns(business.id),
-      listSkills(business.id),
-      getBrain(business.id),
+      safe(() => overviewStats(business.id), { callsToday: 0, connectedPct: 0, hotLeads: 0, bookings: 0 }),
+      safe(() => listCallLogs(business.id, 10), []),
+      safe(() => listCampaigns(business.id), []),
+      safe(() => listSkills(business.id), []),
+      safe(() => getBrain(business.id), null),
     ]);
 
     return {
       business,
+      ephemeral,
       stats,
       recentCalls,
       campaigns: campaigns.filter((c) => c.status === 'Running'),

@@ -1,4 +1,4 @@
-import { createBusiness, getBusiness, listBusinesses, listCallLogs, updateBusiness } from '@/lib/server/tenant';
+import { createBusiness, getBusiness, listBusinesses, listCallLogs, safe, updateBusiness } from '@/lib/server/tenant';
 import type { Business } from '@/lib/types2';
 import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
@@ -14,8 +14,9 @@ export async function GET(req: Request) {
     if (p.get('id')) return { business: await getBusiness(p.get('id')) };
     if (p.get('current')) return { business: await getBusiness() };
 
-    const businesses = await listBusinesses();
-    const allCalls = await listCallLogs(null, 500);
+    /* Either table may not exist yet; the console should still render. */
+    const businesses = await safe(() => listBusinesses(), []);
+    const allCalls = await safe(() => listCallLogs(null, 500), []);
     return {
       businesses,
       stats: {

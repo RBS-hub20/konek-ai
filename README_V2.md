@@ -6,7 +6,7 @@ Supabase. This is what to do to switch your live deployment over.
 ## 1 · Run the migration (required)
 
 Supabase → **SQL Editor → New query** → paste all of
-[`supabase-v2.sql`](./supabase-v2.sql) → **Run**.
+[`supabase.sql`](./supabase.sql) → **Run**.
 
 It is idempotent and non-destructive on top of v1. One rename happens: the v1
 `business_brain` table held RAG chunks, and v2 needs that name for the tenant

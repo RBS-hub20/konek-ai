@@ -1,4 +1,4 @@
-import { createCustomSkill, deleteSkill, getBusiness, listSkills, setSkillActive } from '@/lib/server/tenant';
+import { createCustomSkill, deleteSkill, getBusiness, listSkills, resolveBusinessForCall, safe, setSkillActive } from '@/lib/server/tenant';
 import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 import { hasSupabase } from '@/lib/supabase';
 
@@ -9,9 +9,12 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const p = new URL(req.url).searchParams;
   return handle(async () => {
-    const business = await getBusiness(p.get('businessId'));
-    if (!business) return { skills: [], businessId: null, live: hasSupabase };
-    return { skills: await listSkills(business.id), businessId: business.id, live: hasSupabase };
+    const { business } = await resolveBusinessForCall(p.get('businessId'));
+    return {
+      skills: await safe(() => listSkills(business.id), []),
+      businessId: business.id,
+      live: hasSupabase,
+    };
   });
 }
 

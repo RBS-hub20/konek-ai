@@ -1,4 +1,4 @@
-import { getBusiness, listIntegrations, setIntegration } from '@/lib/server/tenant';
+import { getBusiness, listIntegrations, resolveBusinessForCall, safe, setIntegration } from '@/lib/server/tenant';
 import { env, hasCartesia, hasDeepgram, hasStripe, hasTwilio } from '@/lib/env';
 import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
@@ -28,10 +28,8 @@ const CATALOGUE = [
 export async function GET(req: Request) {
   const businessId = new URL(req.url).searchParams.get('businessId');
   return handle(async () => {
-    const business = await getBusiness(businessId);
-    if (!business) return { integrations: [], businessId: null };
-
-    const saved = await listIntegrations(business.id);
+    const { business } = await resolveBusinessForCall(businessId);
+    const saved = await safe(() => listIntegrations(business.id), []);
     const byProvider = new Map(saved.map((s) => [s.provider, s]));
 
     const integrations = CATALOGUE.map((c) => {

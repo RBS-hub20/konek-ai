@@ -587,3 +587,189 @@ export async function setIntegration(
 }
 
 export type { VibeKey };
+
+/* ── Resilient helpers used by the call path ─────────────────────── */
+
+import { insertResilient, isMissingTable, type PgError } from './resilient';
+
+/** Runs a loader but never lets it break the call. */
+export async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    return fallback;
+  }
+}
+
+export interface ResolvedBusiness {
+  business: Business;
+  /** true when the row is synthesised because the table is missing/unwritable. */
+  ephemeral: boolean;
+  note?: string;
+}
+
+function fallbackBusiness(): Business {
+  return {
+    id: '00000000-0000-4000-8000-000000000001',
+    name: 'Nova Aesthetics',
+    slug: 'nova-aesthetics',
+    owner_email: null,
+    owner_name: null,
+    outbound_number: env.twilioNumber || null,
+    plan: 'pro',
+    calls_used: 0,
+    calls_limit: 2000,
+    status: 'active',
+    mrr: 149,
+    active_vibe: 'PRO_CLOSER',
+    settings: { whatsapp_followup: true, sms_fallback: true },
+    created_at: nowIso(),
+  };
+}
+
+/**
+ * The tenant to place a call as. Never throws: if the businesses table is
+ * missing, empty or unwritable, a working in-memory tenant is returned so the
+ * phone still rings. Only the dashboard's persistence degrades, not the call.
+ */
+export async function resolveBusinessForCall(id?: string | null): Promise<ResolvedBusiness> {
+  if (!hasSupabase) {
+    const b = await getBusiness(id);
+    return { business: b ?? fallbackBusiness(), ephemeral: !b };
+  }
+
+  /* 1 · Read whatever is there — select('*'), never named columns. */
+  try {
+    const q = db().from('businesses').select('*');
+    const { data, error } = id
+      ? await q.eq('id', id).limit(1).maybeSingle()
+      : await q.limit(1).maybeSingle();
+
+    if (!error && data) return { business: normalizeBusiness(data), ephemeral: false };
+    if (error && !isMissingTable(error as PgError)) {
+      /* A real query error (not a missing table) still should not block a call. */
+      return {
+        business: fallbackBusiness(),
+        ephemeral: true,
+        note: `Could not read businesses: ${(error as PgError).message}`,
+      };
+    }
+    if (error && isMissingTable(error as PgError)) {
+      return {
+        business: fallbackBusiness(),
+        ephemeral: true,
+        note: 'The businesses table does not exist yet — using a temporary tenant.',
+      };
+    }
+  } catch (err) {
+    return {
+      business: fallbackBusiness(),
+      ephemeral: true,
+      note: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  /* 2 · Table exists but is empty — seed the default tenant inline. */
+  const seed = fallbackBusiness();
+  const { data, dropped, missingTable } = await insertResilient<Record<string, unknown>>(
+    db(),
+    'businesses',
+    {
+      name: seed.name,
+      slug: seed.slug,
+      /* v1 declared owner_email NOT NULL, so always send something. */
+      owner_email: 'owner@konek.ai',
+      outbound_number: seed.outbound_number,
+      phone_number: seed.outbound_number,
+      plan: seed.plan,
+      calls_used: 0,
+      calls_limit: seed.calls_limit,
+      status: 'active',
+      mrr: seed.mrr,
+      active_vibe: 'PRO_CLOSER',
+      vibe: 'PRO_CLOSER',
+      settings: seed.settings,
+    }
+  );
+
+  if (data) {
+    return {
+      business: normalizeBusiness(data),
+      ephemeral: false,
+      ...(dropped.length ? { note: `Created the default business; this table has no ${dropped.join(', ')} column.` } : {}),
+    };
+  }
+
+  return {
+    business: seed,
+    ephemeral: true,
+    note: missingTable
+      ? 'The businesses table does not exist yet — using a temporary tenant.'
+      : 'Could not create the default business — using a temporary tenant.',
+  };
+}
+
+/**
+ * Best-effort call logging. Writes both naming conventions (phone/phone_number/
+ * to_number, customer_name/name) and drops whatever the table lacks, so a
+ * schema gap can never fail a call that already connected.
+ */
+export async function logCall(row: {
+  business_id?: string | null;
+  campaign_id?: string | null;
+  contact_id?: string | null;
+  phone: string;
+  from_number?: string | null;
+  customer_name?: string | null;
+  vibe?: string | null;
+  status?: string;
+  skills_used?: string[];
+  twilio_sid?: string | null;
+}): Promise<{ id: string | null; dropped: string[]; error: string | null }> {
+  if (!hasSupabase) {
+    const created = await createCallLog({
+      business_id: row.business_id ?? null,
+      campaign_id: row.campaign_id ?? null,
+      contact_id: row.contact_id ?? null,
+      customer_name: row.customer_name ?? null,
+      phone: row.phone,
+      vibe: row.vibe ?? null,
+      status: row.status ?? 'Initiated',
+      skills_used: row.skills_used ?? [],
+      twilio_sid: row.twilio_sid ?? null,
+    });
+    return { id: created.id, dropped: [], error: null };
+  }
+
+  const { data, dropped, missingTable, error } = await insertResilient<{ id: string }>(
+    db(),
+    'call_logs',
+    {
+      business_id: row.business_id ?? null,
+      campaign_id: row.campaign_id ?? null,
+      contact_id: row.contact_id ?? null,
+      /* Both naming conventions — whichever the table has will land. */
+      phone: row.phone,
+      phone_number: row.phone,
+      to_number: row.phone,
+      from_number: row.from_number ?? null,
+      customer_name: row.customer_name ?? null,
+      name: row.customer_name ?? null,
+      vibe: row.vibe ?? null,
+      status: row.status ?? 'Initiated',
+      skills_used: row.skills_used ?? [],
+      duration_seconds: 0,
+      twilio_sid: row.twilio_sid ?? null,
+    }
+  );
+
+  return {
+    id: data?.id ?? null,
+    dropped,
+    error: missingTable
+      ? 'The call_logs table does not exist yet.'
+      : error
+        ? (error.message ?? 'Insert failed')
+        : null,
+  };
+}

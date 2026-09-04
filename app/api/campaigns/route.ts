@@ -1,6 +1,6 @@
 import {
   addContacts, createCampaign, deleteCampaign, getBusiness,
-  listCampaigns, listContacts, updateCampaign,
+  listCampaigns, listContacts, resolveBusinessForCall, safe, updateCampaign,
 } from '@/lib/server/tenant';
 import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
@@ -11,16 +11,15 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const p = new URL(req.url).searchParams;
   return handle(async () => {
-    const business = await getBusiness(p.get('businessId'));
-    if (!business) return { campaigns: [], businessId: null };
+    const { business } = await resolveBusinessForCall(p.get('businessId'));
 
     const id = p.get('id');
     if (id) {
-      const campaigns = await listCampaigns(business.id);
+      const campaigns = await safe(() => listCampaigns(business.id), []);
       const campaign = campaigns.find((c) => c.id === id) ?? null;
-      return { campaign, contacts: campaign ? await listContacts(id) : [] };
+      return { campaign, contacts: campaign ? await safe(() => listContacts(id), []) : [] };
     }
-    return { campaigns: await listCampaigns(business.id), businessId: business.id };
+    return { campaigns: await safe(() => listCampaigns(business.id), []), businessId: business.id };
   });
 }
 
