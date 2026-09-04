@@ -68,9 +68,12 @@ const server = http.createServer(async (req, res) => {
     const phrase = url.searchParams.get('text')
       ?? 'Hi po Renmar, si Kai to from Nova Aesthetics. May quick question lang po ako.';
     try {
-      const result = await ttsCheck(
-        phrase, language, url.searchParams.get('model'), url.searchParams.get('nolang') === '1'
-      );
+      const result = await ttsCheck(phrase, language, url.searchParams.get('model'), url.searchParams.get('nolang') === '1', {
+        speed: url.searchParams.get('speed'),
+        emotion: url.searchParams.get('emotion')
+          ? url.searchParams.get('emotion').split(',').map((x) => x.trim()).filter(Boolean)
+          : null,
+      });
       return json(res, result.bytes > 0 ? 200 : 502, result);
     } catch (err) {
       return json(res, 502, { ok: false, error: err.message, hint: 'Check CARTESIA_API_KEY, CARTESIA_MODEL and the voice name.' });
@@ -181,7 +184,7 @@ async function callProbe(language, seconds) {
 }
 
 /** Runs one short synthesis and counts the audio that comes back. */
-function ttsCheck(phrase, language, model, omitLanguage) {
+function ttsCheck(phrase, language, model, omitLanguage, controls = {}) {
   return new Promise((resolve, reject) => {
     let bytes = 0;
     let chunks = 0;
@@ -189,6 +192,8 @@ function ttsCheck(phrase, language, model, omitLanguage) {
       language,
       model,
       omitLanguage,
+      speed: controls.speed,
+      emotion: controls.emotion,
       onAudio: (b64) => { chunks += 1; bytes += Buffer.from(b64, 'base64').length; },
       onError: (err) => { settle(() => reject(err)); },
     });
@@ -207,6 +212,8 @@ function ttsCheck(phrase, language, model, omitLanguage) {
           voice: stream.voice,
           model: stream.model,
           languageSent: stream.omitLanguage ? null : (stream.voice?.code ?? null),
+          speedSent: stream.omitSpeed ? null : (stream.speed || null),
+          emotionSent: stream.omitEmotion ? null : (stream.emotion?.length ? stream.emotion : null),
           /* 8000 mu-law bytes is one second of phone audio. */
           approxSeconds: Number((bytes / 8000).toFixed(2)),
           ...(bytes === 0 ? { error: 'Connected but no audio came back — check the model id and voice.' } : {}),

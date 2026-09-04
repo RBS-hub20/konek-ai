@@ -162,7 +162,7 @@ export function shapeForSpeech(text, language = 'EN') {
  * instead of talking over the caller.
  */
 export class CartesiaStream {
-  constructor({ language = 'EN', model = null, omitLanguage = false, onAudio, onError }) {
+  constructor({ language = 'EN', model = null, omitLanguage = false, speed = null, emotion = null, onAudio, onError }) {
     this.language = language;
     this.model = model || modelForLanguage(language);
     /* Sonic's `language` field takes a fixed set of codes. A voice that speaks
@@ -174,6 +174,8 @@ export class CartesiaStream {
        rather than the whole utterance. */
     this.omitSpeed = false;
     this.omitEmotion = false;
+    this.speed = speed !== null ? speed : config.cartesiaSpeed;
+    this.emotion = emotion !== null ? emotion : config.cartesiaEmotion;
     this.lastTranscript = '';
     this.onAudio = onAudio;
     this.onError = onError;
@@ -322,15 +324,12 @@ export class CartesiaStream {
 
     /* Slightly under natural pace reads as considered rather than rushed,
        which is most of the difference between "robot" and "person". */
-    if (config.cartesiaSpeed !== '' && !this.omitSpeed) {
-      const n = Number(config.cartesiaSpeed);
-      body.speed = Number.isFinite(n) ? n : config.cartesiaSpeed;
+    if (this.speed !== '' && this.speed != null && !this.omitSpeed) {
+      const n = Number(this.speed);
+      body.speed = Number.isFinite(n) ? n : this.speed;
     }
-    if (config.cartesiaEmotion.length && !this.omitEmotion) {
-      body.voice.__experimental_controls = {
-        emotion: config.cartesiaEmotion,
-        ...(config.cartesiaSpeed !== '' && !this.omitSpeed ? { speed: config.cartesiaSpeed } : {}),
-      };
+    if (this.emotion?.length && !this.omitEmotion) {
+      body.voice.__experimental_controls = { emotion: this.emotion };
     }
     try {
       this.ws.send(JSON.stringify(body));
