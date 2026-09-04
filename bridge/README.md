@@ -152,6 +152,28 @@ that is. If Sonic is misconfigured it returns the actual Cartesia error.
 **If Cartesia fails at any point the call does not drop** — the bridge logs the
 reason and finishes with the OpenAI voice.
 
+### Sounding human
+
+Three things do the work, in order of impact:
+
+1. **What the model writes.** Sonic speaks it verbatim, so the call prompt has
+   a HOW TO SPEAK section — contractions, one or two sentences a turn,
+   punctuation where a person breathes, numbers spoken not printed.
+2. **Speed `0.95`** — a touch under natural pace reads as considered rather
+   than rushed. `CARTESIA_SPEED`; `slow` also works and is noticeably slower.
+3. **Emotion `positivity:high`** — warmth without sounding performed.
+   `CARTESIA_EMOTION`, comma-separated.
+
+Both controls are verified on this account in all five languages. They must
+travel in **separate fields** — `speed` at the top level, `emotion` under the
+voice's experimental controls. Sending speed in both places makes Sonic return
+silence rather than an error, which is a miserable thing to debug. Check any
+change with:
+
+```bash
+curl "https://<bridge>/tts-check?language=TAGLISH&speed=0.95&emotion=positivity:high"
+```
+
 ### Pauses and pronunciation
 
 Sonic breathes on punctuation, so the model's own commas do most of the work.

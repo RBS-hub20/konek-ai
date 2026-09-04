@@ -31,11 +31,12 @@ export const config = {
   cartesiaVoiceId: read('CARTESIA_VOICE_ID'),
   cartesiaVersion: read('CARTESIA_VERSION', '2024-06-10'),
   cartesiaWsUrl: read('CARTESIA_WS_URL', 'wss://api.cartesia.ai/tts/websocket'),
-  /* Off by default: sending an unsupported control makes Sonic return no
-     audio at all rather than an error, so these are opt-in and must be
-     confirmed against the account with /tts-check?speed=..&emotion=.. first. */
-  cartesiaSpeed: read('CARTESIA_SPEED', ''),
-  cartesiaEmotion: read('CARTESIA_EMOTION', '')
+  /* Confirmed working on this account in all five languages via /tts-check.
+     They must go in separate fields — speed at the top level, emotion under
+     the voice's experimental controls. Sending speed in both places makes
+     Sonic return silence rather than an error. */
+  cartesiaSpeed: read('CARTESIA_SPEED', '0.95'),
+  cartesiaEmotion: read('CARTESIA_EMOTION', 'positivity:high')
     .split(',').map((x) => x.trim()).filter(Boolean),
   /* Per-language voices — Sonic needs a voice that actually speaks the
      language, so these are chosen alongside the language code. */
