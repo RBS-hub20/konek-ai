@@ -171,6 +171,7 @@ async function callProbe(language, seconds) {
     firstFrameMs: stub.firstFrameMs,
     ttsFailed: session.ttsFailed,
     stage: session.stage ?? 'not started',
+    openaiApiShape: session.betaShape ? 'beta' : 'ga',
     lastError: session.lastError ?? null,
     /* Diagnostic lines only — the transcript scope is excluded on purpose. */
     log: recentLogs(120).filter((l) => !l.includes('(transcript)')).slice(-25),

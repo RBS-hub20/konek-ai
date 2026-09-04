@@ -137,12 +137,17 @@ export class CallSession {
 
     this.stage = 'connecting to openai';
     const url = `${config.realtimeUrl}?model=${encodeURIComponent(config.realtimeModel)}`;
+    /* The Realtime Beta shape is disabled on many accounts now
+       (beta_api_shape_disabled), so the GA shape is the default and the beta
+       header is only sent when explicitly asked for. */
+    const beta = config.openaiApiShape === 'beta';
     const ws = new WebSocket(url, {
       headers: {
         Authorization: `Bearer ${config.openaiKey}`,
-        'OpenAI-Beta': 'realtime=v1',
+        ...(beta ? { 'OpenAI-Beta': 'realtime=v1' } : {}),
       },
     });
+    this.betaShape = beta;
     this.openai = ws;
 
     ws.on('open', () => {
@@ -150,38 +155,58 @@ export class CallSession {
       log.info('openai', `connected (${config.realtimeModel}) for ${this.callSid}`);
       /* With Sonic speaking, the model only needs to produce text — asking it
          for audio as well would bill for a voice nobody hears. */
-      const speaking = this.tts ? ['text'] : ['text', 'audio'];
-      this.sendOpenAI({
-        type: 'session.update',
-        session: {
-          /* g711_ulaw both ways = byte-for-byte compatible with Twilio. */
-          input_audio_format: 'g711_ulaw',
-          output_audio_format: 'g711_ulaw',
-          voice: voiceForVibe(callCfg.voiceStyle),
-          instructions: callCfg.systemPrompt,
-          modalities: speaking,
-          temperature: 0.8,
-          /* Server-side voice activity detection gives natural turn-taking
-             and lets the caller interrupt. */
-          turn_detection: {
-            type: 'server_vad',
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 600,
-          },
-          input_audio_transcription: { model: 'whisper-1' },
-        },
-      });
+      const wantAudio = !this.tts;
+      const vad = {
+        type: 'server_vad',
+        threshold: 0.5,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 600,
+      };
+
+      this.sendOpenAI(
+        this.betaShape
+          ? {
+              type: 'session.update',
+              session: {
+                /* g711_ulaw both ways = byte-for-byte compatible with Twilio. */
+                input_audio_format: 'g711_ulaw',
+                output_audio_format: 'g711_ulaw',
+                voice: voiceForVibe(callCfg.voiceStyle),
+                instructions: callCfg.systemPrompt,
+                modalities: wantAudio ? ['text', 'audio'] : ['text'],
+                turn_detection: vad,
+                input_audio_transcription: { model: 'whisper-1' },
+              },
+            }
+          : {
+              type: 'session.update',
+              session: {
+                type: 'realtime',
+                instructions: callCfg.systemPrompt,
+                output_modalities: wantAudio ? ['audio'] : ['text'],
+                audio: {
+                  input: {
+                    /* audio/pcmu is GA's name for 8 kHz mu-law. */
+                    format: { type: 'audio/pcmu' },
+                    turn_detection: vad,
+                    transcription: { model: 'whisper-1' },
+                  },
+                  ...(wantAudio
+                    ? { output: { format: { type: 'audio/pcmu' }, voice: voiceForVibe(callCfg.voiceStyle) } }
+                    : {}),
+                },
+              },
+            }
+      );
 
       /* Kai speaks first, with the tenant's own opener. */
       if (this.tts) this.tts.begin();
-      this.sendOpenAI({
-        type: 'response.create',
-        response: {
-          modalities: speaking,
-          instructions: `Greet the customer with exactly this line, then continue the conversation naturally: "${callCfg.opener}"`,
-        },
-      });
+      const opener = `Greet the customer with exactly this line, then continue the conversation naturally: "${callCfg.opener}"`;
+      this.sendOpenAI(
+        this.betaShape
+          ? { type: 'response.create', response: { modalities: wantAudio ? ['text', 'audio'] : ['text'], instructions: opener } }
+          : { type: 'response.create', response: { instructions: opener } }
+      );
     });
 
     ws.on('message', (raw) => this.onOpenAIMessage(raw));
@@ -256,9 +281,12 @@ export class CallSession {
         this.assistantItemId = null;
         break;
 
-      case 'error':
-        log.error('openai', 'api error', evt.error ?? evt);
+      case 'error': {
+        const e = evt.error ?? evt;
+        this.lastError = `openai: ${e.code ?? e.type ?? 'error'} — ${String(e.message ?? '').slice(0, 200)}`;
+        log.error('openai', 'api error', e);
         break;
+      }
 
       default:
         /* Record each event type once so a renamed delta event is obvious. */

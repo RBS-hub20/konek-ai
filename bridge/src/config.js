@@ -14,6 +14,9 @@ export const config = {
   openaiKey: read('OPENAI_API_KEY'),
   realtimeModel: read('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
   realtimeUrl: read('OPENAI_REALTIME_URL', 'wss://api.openai.com/v1/realtime'),
+  /* 'ga' (default) or 'beta'. Accounts with the beta shape disabled reject the
+     old payload with beta_api_shape_disabled. */
+  openaiApiShape: read('OPENAI_API_SHAPE', 'ga').toLowerCase(),
 
   /* Where to fetch the tenant's prompt, and post the transcript back. */
   appUrl: read('KONEK_APP_URL', 'https://konek-ai.vercel.app').replace(/\/$/, ''),
