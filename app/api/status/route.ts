@@ -12,6 +12,7 @@ import {
   serviceStatus,
 } from '@/lib/env';
 import { ok } from '@/lib/server/http';
+import { listBusinesses } from '@/lib/server/tenant';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -28,6 +29,24 @@ export async function GET() {
   try {
     const services = serviceStatus();
     const warnings = configWarnings();
+
+    /* Per-tenant readiness: a business with no outbound number cannot dial. */
+    let businesses: {
+      id: string; name: string; outbound_number: string | null; plan: string;
+      calls_used: number; calls_limit: number; status: string; canCall: boolean;
+    }[] = [];
+    try {
+      businesses = (await listBusinesses()).map((b) => ({
+        id: b.id, name: b.name, outbound_number: b.outbound_number, plan: b.plan,
+        calls_used: b.calls_used, calls_limit: b.calls_limit, status: b.status,
+        canCall:
+          b.status === 'active' &&
+          b.calls_used < b.calls_limit &&
+          Boolean(b.outbound_number || env.twilioNumber),
+      }));
+    } catch {
+      /* Status must answer even if the database is unreachable. */
+    }
 
     return ok({
       mode: hasSupabase ? 'live' : 'mock',
@@ -60,6 +79,7 @@ export async function GET() {
         commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
       },
       services,
+      businesses,
       warnings,
       note: hasSupabase
         ? 'Connected to Supabase.'

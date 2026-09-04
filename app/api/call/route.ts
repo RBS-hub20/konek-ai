@@ -1,68 +1,77 @@
 import {
-  activeSkillPrompts,
-  brainForPrompt,
-  createCall,
-  getBusiness,
-  incrementCallsUsed,
-  listCalls,
-  listCustomSkills,
-} from '@/lib/server/repo';
-import { DEMO_BUSINESS_ID } from '@/lib/server/seed';
-import { buildSystemPrompt, DEFAULT_VIBE } from '@/lib/ai/prompt';
+  bumpCampaign, createCallLog, getBrain, getBusiness, getCampaign,
+  incrementCallsUsed, listCallLogs, listSkills, updateContactStatus,
+} from '@/lib/server/tenant';
+import { buildCallPrompt, buildOpener } from '@/lib/ai/callPrompt';
+import { vibeConfig } from '@/lib/ai/vibes';
+import { vibeToKey } from '@/lib/types2';
 import { env, hasTwilio, hasCartesia, hasDeepgram } from '@/lib/env';
-import { guardCallApi, isValidPhone } from '@/lib/server/auth';
+import { guardCall, isValidPhone, toE164 } from '@/lib/server/operator';
 import { fail, handle, ok, readJson } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 interface CallBody {
-  businessId?: string;
+  /* `to` and `customerPhone` are both accepted. */
+  to?: string;
   customerPhone?: string;
   customerName?: string;
+  business_id?: string;
+  businessId?: string;
+  campaign_id?: string;
+  campaignId?: string;
+  contact_id?: string;
   vibe?: string;
   skills?: string[];
-  /** Return the assembled prompt without dialling anyone. */
+  /** Assemble the prompt and return it without dialling anyone. */
   dryRun?: boolean;
 }
 
 /** GET /api/call?businessId=&limit= — the call log. */
 export async function GET(req: Request) {
   const p = new URL(req.url).searchParams;
-  const businessId = p.get('businessId') ?? DEMO_BUSINESS_ID;
-  const limit = Math.min(Number(p.get('limit') ?? 50) || 50, 200);
-  return handle(async () => ({ calls: await listCalls(businessId, limit), businessId }));
+  return handle(async () => {
+    const business = await getBusiness(p.get('businessId'));
+    const calls = await listCallLogs(business?.id ?? null, Math.min(Number(p.get('limit') ?? 100) || 100, 500));
+    return { calls, businessId: business?.id ?? null };
+  });
 }
 
 /**
  * POST /api/call — place a call.
  *
- *  1. Load the business, its Business Brain and its active skills
- *  2. Assemble one system prompt: vibe + goal + skills + custom skills + brain
- *  3. Dial via Twilio, streaming audio to the voice websocket
- *  4. Record the call in the calls table
- *
- * With no Twilio credentials it stops after step 2 and records the call as
- * `initiated`, so the whole pipeline is exercisable without spending money.
+ *  1. Resolve the tenant and its outbound number (DB first, env as fallback)
+ *  2. Load Business Brain + that tenant's active skills + the vibe
+ *  3. Assemble one system prompt — the Brain is the only source of facts
+ *  4. Dial through Twilio from the tenant's own number
+ *  5. Write a call_logs row, count it against the plan, bump the campaign
  */
 export async function POST(req: Request) {
-  const guard = guardCallApi(req);
-  if (!guard.ok) return fail(guard.message, guard.status);
+  const guard = guardCall(req);
+  if (!guard.ok) {
+    return Response.json(
+      { error: guard.message, ...(guard.needsUnlock ? { needsUnlock: true } : {}) },
+      { status: guard.status }
+    );
+  }
 
   const body = await readJson<CallBody>(req);
   if (!body) return fail('Invalid JSON body');
 
-  const businessId = body.businessId ?? DEMO_BUSINESS_ID;
-  const customerPhone = (body.customerPhone ?? '').trim();
-
-  if (!customerPhone) return fail('customerPhone is required');
-  if (!isValidPhone(customerPhone)) return fail('customerPhone is not a valid phone number');
+  const rawPhone = (body.to ?? body.customerPhone ?? '').trim();
+  if (!rawPhone) return fail('to (phone number) is required');
+  if (!isValidPhone(rawPhone)) return fail(`"${rawPhone}" is not a valid phone number. Use international format, e.g. +971501184402.`);
+  const phone = toE164(rawPhone);
 
   try {
-    /* ── 1. Context ───────────────────────────────────────────────── */
-    const business = await getBusiness(businessId);
-    if (!business) return fail('Business not found', 404);
+    /* ── 1 · Tenant ───────────────────────────────────────────────── */
+    const business = await getBusiness(body.business_id ?? body.businessId ?? null);
+    if (!business) return fail('No business found. Create one first via POST /api/business.', 404);
 
+    if (business.status !== 'active') {
+      return fail(`Business "${business.name}" is ${business.status}. Reactivate it to place calls.`, 403);
+    }
     if (business.calls_used >= business.calls_limit) {
       return fail(
         `Call limit reached (${business.calls_used}/${business.calls_limit}). Upgrade the plan to continue.`,
@@ -70,29 +79,42 @@ export async function POST(req: Request) {
       );
     }
 
-    const vibe = body.vibe ?? business.vibe ?? DEFAULT_VIBE;
-    const [skills, customSkills, brain] = await Promise.all([
-      activeSkillPrompts(businessId, body.skills),
-      listCustomSkills(businessId),
-      brainForPrompt(businessId),
-    ]);
+    /* The tenant's own number wins; the env var is only a fallback. */
+    const from = business.outbound_number?.trim() || env.twilioNumber;
+    if (hasTwilio && !from) {
+      return fail('This business has no outbound number. Set one in Settings.', 400);
+    }
 
-    /* ── 2. The prompt the agent runs on ──────────────────────────── */
-    const systemPrompt = buildSystemPrompt({ business, vibe, skills, customSkills, brain });
+    /* ── 2 · Context ──────────────────────────────────────────────── */
+    const campaignId = body.campaign_id ?? body.campaignId ?? null;
+    const campaign = campaignId ? await getCampaign(campaignId) : null;
+    const vibe = vibeToKey(body.vibe ?? campaign?.vibe ?? business.active_vibe ?? 'PRO_CLOSER');
+
+    const [brain, allSkills] = await Promise.all([getBrain(business.id), listSkills(business.id)]);
+
+    const wanted = body.skills?.length ? body.skills : campaign?.skills?.length ? campaign.skills : null;
+    const skills = wanted
+      ? allSkills.filter((s) => wanted.includes(s.id))
+      : allSkills.filter((s) => s.is_active);
+
+    /* ── 3 · Prompt ───────────────────────────────────────────────── */
+    const systemPrompt = buildCallPrompt({
+      business, brain, skills, vibe, customerName: body.customerName ?? null,
+    });
+    const opener = buildOpener(business, brain, vibe, body.customerName ?? null);
 
     if (body.dryRun) {
       return ok({
-        dryRun: true,
-        vibe,
+        dryRun: true, business: business.name, from, to: phone, vibe,
         skillsUsed: skills.map((s) => s.id),
-        promptChars: systemPrompt.length,
-        systemPrompt,
+        goal: brain?.goal ?? 'Book',
+        promptChars: systemPrompt.length, opener, systemPrompt,
       });
     }
 
-    /* ── 3. Dial ──────────────────────────────────────────────────── */
+    /* ── 4 · Dial ─────────────────────────────────────────────────── */
     let twilioSid: string | null = null;
-    let status = 'initiated';
+    let status = 'Initiated';
     let mock = true;
     let warning: string | undefined;
 
@@ -100,59 +122,81 @@ export async function POST(req: Request) {
       try {
         const { default: Twilio } = await import('twilio');
         const client = Twilio(env.twilioSid, env.twilioToken);
-        const streamUrl = `${env.appUrl.replace(/^http/, 'ws')}/api/call/stream`;
-
         const call = await client.calls.create({
-          to: customerPhone,
-          from: env.twilioNumber,
-          twiml: `<Response><Connect><Stream url="${streamUrl}"><Parameter name="businessId" value="${businessId}"/><Parameter name="vibe" value="${escapeXml(vibe)}"/></Stream></Connect></Response>`,
+          to: phone,
+          from: from!,
+          twiml: buildTwiml(opener, vibe),
           statusCallback: `${env.appUrl}/api/call/transcript`,
           statusCallbackEvent: ['initiated', 'answered', 'completed'],
+          statusCallbackMethod: 'POST',
         });
-
         twilioSid = call.sid;
-        status = 'connected';
+        status = 'Connected';
         mock = false;
       } catch (err) {
-        /* Record the attempt rather than losing it. */
-        status = 'failed';
+        status = 'Failed';
         warning = err instanceof Error ? err.message : String(err);
       }
     } else {
-      warning = 'No Twilio credentials — call recorded but not dialled.';
+      warning = 'Twilio is not configured — the call was logged but nobody was dialled.';
     }
 
-    /* ── 4. Persist ───────────────────────────────────────────────── */
-    const call = await createCall({
-      business_id: businessId,
+    /* ── 5 · Persist ──────────────────────────────────────────────── */
+    const log = await createCallLog({
+      business_id: business.id,
+      campaign_id: campaignId,
+      contact_id: body.contact_id ?? null,
       customer_name: body.customerName ?? null,
-      customer_phone: customerPhone,
+      phone,
       skills_used: skills.map((s) => s.id),
       vibe,
       status,
       twilio_sid: twilioSid,
     });
 
-    if (status !== 'failed') await incrementCallsUsed(businessId);
+    if (status !== 'Failed') {
+      await incrementCallsUsed(business.id);
+      if (campaignId) await bumpCampaign(campaignId, 'called_count');
+      if (body.contact_id) await updateContactStatus(body.contact_id, 'Called');
+    }
 
     return ok(
       {
-        success: status !== 'failed',
-        callId: call.id,
-        twilioSid,
-        status,
-        mock,
-        vibe,
+        success: status !== 'Failed',
+        callId: log.id, twilioSid, status, mock,
+        from, to: phone, vibe,
+        business: business.name,
         skillsUsed: skills.map((s) => s.id),
         promptChars: systemPrompt.length,
         services: { twilio: hasTwilio, cartesia: hasCartesia, deepgram: hasDeepgram },
         ...(warning ? { warning } : {}),
       },
-      { status: status === 'failed' ? 502 : 201 }
+      { status: status === 'Failed' ? 502 : 201 }
     );
   } catch (err) {
     return fail('Could not place call', 500, err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * The TwiML Twilio executes when the customer answers.
+ *
+ * Without a media-stream bridge this speaks the opener with a Twilio voice
+ * matched to the vibe, then hangs up. Once the websocket bridge exists,
+ * swap this for <Connect><Stream url="wss://..."/></Connect>.
+ */
+function buildTwiml(opener: string, vibe: string): string {
+  const v = vibeConfig(vibe);
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<Response>` +
+    `<Say voice="${v.twilioVoice}">${escapeXml(opener)}</Say>` +
+    `<Pause length="1"/>` +
+    `<Say voice="${v.twilioVoice}">${escapeXml(
+      'Thanks for taking my call. Someone from the team will follow up shortly. Have a great day!'
+    )}</Say>` +
+    `</Response>`
+  );
 }
 
 function escapeXml(s: string) {

@@ -45,19 +45,22 @@ export default function AdminPage() {
   const [tab, setTab] = useState<TabId>('overview');
   const [navOpen, setNavOpen] = useState(false);
 
-  /* The store rehydrates from localStorage on the client — wait for it so
-     server and client markup never disagree, then pull live state from the API. */
-  const [ready, setReady] = useState(false);
-  const hydrateFromServer = useKonekStore((s) => s.hydrateFromServer);
+  /* All dashboard data comes from the API. Show the branded loader until the
+     first fetch lands so server and client markup never disagree. */
+  const hydrate = useKonekStore((s) => s.hydrate);
+  const hydrated = useKonekStore((s) => s.hydrated);
   useEffect(() => {
-    setReady(true);
-    void hydrateFromServer();
-  }, [hydrateFromServer]);
+    void hydrate();
+  }, [hydrate]);
 
-  const profileName = useKonekStore((s) => s.profile.name);
-  const activeCount = useKonekStore((s) => s.activeSkills.length);
+  const business = useKonekStore((s) => s.business);
+  const activeCount = useKonekStore((s) => s.skills.filter((k) => k.is_active).length);
+  const loadError = useKonekStore((s) => s.loadError);
 
-  if (!ready) return <LoadingScreen label="Loading your dashboard" />;
+  if (!hydrated) return <LoadingScreen label="Loading your dashboard" />;
+
+  const profileName = business?.name ?? 'KONEK AI';
+  const planLabel = business ? `${business.plan[0].toUpperCase()}${business.plan.slice(1)} plan` : '—';
 
   const current = NAV.find((n) => n.id === tab)!;
 
@@ -119,7 +122,7 @@ export default function AdminPage() {
             </span>
             <div className="min-w-0">
               <div className="truncate text-[12px] font-medium text-ink">{profileName}</div>
-              <div className="text-[11px] text-muted">Pro plan</div>
+              <div className="text-[11px] text-muted">{planLabel}</div>
             </div>
           </div>
           <ThemeToggle withLabel className="w-full justify-center" />
@@ -158,6 +161,11 @@ export default function AdminPage() {
         </header>
 
         <main className="flex-1 px-5 py-8 md:px-8 md:py-10">
+          {loadError && (
+            <div className="mb-6 rounded-brand border border-line bg-surface p-4 text-[13px] text-muted">
+              {loadError}
+            </div>
+          )}
           {tab === 'overview' && <OverviewTab />}
           {tab === 'campaigns' && <CampaignsTab />}
           {tab === 'brain' && <BusinessBrainTab />}

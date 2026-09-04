@@ -1,17 +1,18 @@
-import { findCallByTwilioSid, updateCall } from '@/lib/server/repo';
+import { bumpCampaign, findCallByTwilioSid, updateCallLog, updateContactStatus } from '@/lib/server/tenant';
+import type { CallLog } from '@/lib/types2';
 import { fail, ok } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 /**
- * POST /api/call/transcript
+ * POST /api/call/transcript — the write-back for a finished call.
  *
  * Two producers post here:
- *   · Deepgram   — JSON  { callId | twilioSid, transcript, duration?, status?, recordingUrl? }
- *   · Twilio     — form-encoded status callbacks (CallSid, CallStatus, CallDuration, RecordingUrl)
+ *   · Twilio    — form-encoded status callbacks (CallSid, CallStatus, CallDuration, RecordingUrl)
+ *   · Deepgram  — JSON { callId | twilioSid, transcript, duration, status }
  *
- * Both are normalised onto the same call row.
+ * Both are normalised onto the same call_logs row.
  */
 export async function POST(req: Request) {
   const contentType = req.headers.get('content-type') ?? '';
@@ -29,11 +30,10 @@ export async function POST(req: Request) {
       callId = str(b.callId);
       twilioSid = str(b.twilioSid) ?? str(b.CallSid);
       transcript = str(b.transcript) ?? deepgramTranscript(b);
-      duration = num(b.duration);
+      duration = num(b.duration) ?? num(b.duration_seconds);
       status = str(b.status);
       recordingUrl = str(b.recordingUrl) ?? str(b.recording_url);
     } else {
-      /* Twilio posts application/x-www-form-urlencoded */
       const form = await req.formData();
       twilioSid = (form.get('CallSid') as string) ?? undefined;
       status = mapTwilioStatus(form.get('CallStatus') as string | null);
@@ -42,28 +42,39 @@ export async function POST(req: Request) {
       transcript = (form.get('TranscriptionText') as string) ?? undefined;
     }
 
-    if (!callId && twilioSid) {
-      const existing = await findCallByTwilioSid(twilioSid);
-      callId = existing?.id;
-    }
-    if (!callId) return fail('Unknown call — provide callId or a known twilioSid', 404);
+    let existing: CallLog | null = null;
+    if (twilioSid) existing = await findCallByTwilioSid(twilioSid);
+    if (!callId && existing) callId = existing.id;
 
-    const patch: Record<string, unknown> = {};
+    /* Twilio fires "initiated" before our own insert has necessarily landed.
+       Acknowledge rather than 404, or Twilio will keep retrying. */
+    if (!callId) return ok({ matched: false, note: 'No call row for this SID yet.' });
+
+    const patch: Partial<CallLog> = {};
     if (transcript) patch.transcript = transcript;
-    if (typeof duration === 'number') patch.duration = duration;
+    if (typeof duration === 'number') patch.duration_seconds = duration;
     if (status) patch.status = status;
     if (recordingUrl) patch.recording_url = recordingUrl;
 
     if (!Object.keys(patch).length) return ok({ callId, updated: false });
 
-    const updated = await updateCall(callId, patch);
+    const updated = await updateCallLog(callId, patch);
+
+    /* A call that turned into a hot lead counts toward its campaign. */
+    if (updated && status === 'Hot Lead' && existing?.status !== 'Hot Lead' && updated.campaign_id) {
+      await bumpCampaign(updated.campaign_id, 'hot_leads');
+    }
+    if (updated?.contact_id && status) {
+      await updateContactStatus(updated.contact_id, status);
+    }
+
     return ok({ callId, updated: Boolean(updated), fields: Object.keys(patch) });
   } catch (err) {
-    return fail('Could not record transcript', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not record call result', 500, err instanceof Error ? err.message : String(err));
   }
 }
 
-/** Twilio also GETs this URL to verify it exists. */
+/** Twilio probes the URL before using it. */
 export async function GET() {
   return ok({ ok: true, accepts: ['application/json', 'application/x-www-form-urlencoded'] });
 }
@@ -71,14 +82,11 @@ export async function GET() {
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v ? Number(v) : undefined);
 
-/** Pulls the transcript out of a raw Deepgram results payload. */
 function deepgramTranscript(b: Record<string, unknown>): string | undefined {
   try {
-    const results = b.results as
-      | { channels?: { alternatives?: { transcript?: string }[] }[] }
-      | undefined;
+    const results = b.results as { channels?: { alternatives?: { transcript?: string }[] }[] } | undefined;
     const t = results?.channels?.[0]?.alternatives?.[0]?.transcript;
-    return t && t.trim() ? t : undefined;
+    return t?.trim() ? t : undefined;
   } catch {
     return undefined;
   }
@@ -87,15 +95,10 @@ function deepgramTranscript(b: Record<string, unknown>): string | undefined {
 function mapTwilioStatus(s: string | null): string | undefined {
   if (!s) return undefined;
   const map: Record<string, string> = {
-    queued: 'initiated',
-    initiated: 'initiated',
-    ringing: 'initiated',
-    'in-progress': 'connected',
-    completed: 'completed',
-    busy: 'no_answer',
-    'no-answer': 'no_answer',
-    failed: 'failed',
-    canceled: 'failed',
+    queued: 'Initiated', initiated: 'Initiated', ringing: 'Initiated',
+    'in-progress': 'Connected', completed: 'Completed',
+    busy: 'No Answer', 'no-answer': 'No Answer',
+    failed: 'Failed', canceled: 'Failed',
   };
   return map[s] ?? s;
 }

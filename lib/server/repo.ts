@@ -284,12 +284,14 @@ export async function incrementCallsUsed(businessId: string): Promise<void> {
   await updateBusiness(businessId, { calls_used: (b.calls_used ?? 0) + 1 });
 }
 
-/* ── Business Brain ──────────────────────────────────────────────── */
+/* ── Business Brain chunks (RAG) ─────────────────────────────────
+   v2 renamed this table to brain_chunks; `business_brain` is now the
+   one-row-per-tenant profile (see lib/server/tenant.ts).             */
 
 export async function listBrain(businessId: string): Promise<BrainRow[]> {
   if (!hasSupabase) return mem().brain.filter((b) => b.business_id === businessId);
   const { data, error } = await db()
-    .from('business_brain')
+    .from('brain_chunks')
     .select('id, business_id, content, source_type, source_name, created_at')
     .eq('business_id', businessId)
     .order('created_at', { ascending: false });
@@ -338,7 +340,7 @@ export async function addBrain({
     embedding: vectors[i],
   }));
   const { data, error } = await db()
-    .from('business_brain')
+    .from('brain_chunks')
     .insert(payload)
     .select('id, business_id, content, source_type, source_name, created_at');
   if (error) throw error;
@@ -352,7 +354,7 @@ export async function deleteBrainBySource(businessId: string, sourceName: string
     return;
   }
   const { error } = await db()
-    .from('business_brain')
+    .from('brain_chunks')
     .delete()
     .eq('business_id', businessId)
     .eq('source_name', sourceName);

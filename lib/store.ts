@@ -1,257 +1,220 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { Vibe } from './mockData';
-import { TRIGGER_OPTIONS, VIBES } from './mockData';
-import { api, tryApi, type ServerCustomSkill } from './apiClient';
+import { api, tryApi, type ApiError } from './apiClient';
+import type {
+  Business, BusinessBrain, CallLog, Campaign, OverviewStats, SkillRecord,
+} from './types2';
+import { vibeToKey, type VibeKey } from './types2';
 
-export interface CustomSkill {
-  id: string;
-  name: string;
-  description: string;
-  trigger: (typeof TRIGGER_OPTIONS)[number] | string;
-  vibe: Vibe;
-  createdAt: string;
-}
-
-export interface BusinessProfile {
-  name: string;
-  sells: string;
-  price: string;
-}
-
-export type Goal = 'Explain' | 'Book' | 'Close';
+/* Single source of truth for the dashboard. Everything here comes from the
+   API — there is no mock data left in the client. */
 
 interface KonekState {
-  /* Server sync */
-  businessId: string | null;
-  serverLive: boolean;
+  /* Bootstrap */
   hydrated: boolean;
-  syncError: string | null;
-  hydrateFromServer: () => Promise<void>;
+  loadError: string | null;
+  hydrate: () => Promise<void>;
 
-  /* Vibe Mode */
-  vibe: Vibe;
-  setVibe: (v: Vibe) => void;
+  /* Tenant */
+  business: Business | null;
+  businessId: string | null;
+  setBusinessField: (patch: Partial<Business>) => Promise<void>;
 
-  /* Skills Library */
-  activeSkills: string[];
-  toggleSkill: (id: string) => void;
-  isSkillActive: (id: string) => boolean;
+  /* Live-call gate */
+  unlocked: boolean;
+  unlockRequired: boolean;
+  liveCallsEnabled: boolean;
+  refreshSession: () => Promise<void>;
+  unlock: (key: string) => Promise<void>;
 
-  /* Custom Skill Builder */
-  customSkills: CustomSkill[];
-  addCustomSkill: (s: Omit<CustomSkill, 'id' | 'createdAt'>) => void;
-  updateCustomSkill: (id: string, patch: Partial<CustomSkill>) => void;
-  removeCustomSkill: (id: string) => void;
+  /* Overview */
+  stats: OverviewStats;
+  recentCalls: CallLog[];
+  runningCampaigns: Campaign[];
+  setup: { vibe: string; activeSkills: number; customSkills: number; callsUsed: number; callsLimit: number; goal: string } | null;
+  loadOverview: () => Promise<void>;
+
+  /* Skills */
+  skills: SkillRecord[];
+  loadSkills: () => Promise<void>;
+  toggleSkill: (id: string) => Promise<void>;
+  addSkill: (input: { name: string; description: string; category?: string; vibe?: string; script?: string }) => Promise<void>;
+  removeSkill: (id: string) => Promise<void>;
 
   /* Business Brain */
-  profile: BusinessProfile;
-  setProfile: (p: Partial<BusinessProfile>) => void;
-  knowledge: string[];
-  addKnowledge: (name: string) => void;
-  removeKnowledge: (name: string) => void;
-  goal: Goal;
-  setGoal: (g: Goal) => void;
+  brain: BusinessBrain | null;
+  loadBrain: () => Promise<void>;
+  saveBrain: (patch: Partial<BusinessBrain>) => Promise<void>;
 
-  /* Knowledge sources come back from /api/brain once hydrated */
-  setKnowledge: (names: string[]) => void;
+  /* Campaigns */
+  campaigns: Campaign[];
+  loadCampaigns: () => Promise<void>;
 
-  /* Settings */
-  twilioNumber: string;
-  setTwilioNumber: (n: string) => void;
-  whatsapp: boolean;
-  setWhatsapp: (v: boolean) => void;
+  /* Call logs */
+  calls: CallLog[];
+  loadCalls: () => Promise<void>;
+
+  /* Vibe */
+  vibe: VibeKey;
+  setVibe: (v: string) => Promise<void>;
 }
 
-export const useKonekStore = create<KonekState>()(
-  persist(
-    (set, get) => ({
-      businessId: null,
-      serverLive: false,
-      hydrated: false,
-      syncError: null,
+const EMPTY_STATS: OverviewStats = { callsToday: 0, connectedPct: 0, hotLeads: 0, bookings: 0 };
 
-      /* Pulls the real state out of the API. Falls back silently to whatever
-         is already in localStorage if the backend is unreachable. */
-      hydrateFromServer: async () => {
-        const skills = await tryApi(() => api.skills());
-        if (!skills) {
-          set({ hydrated: true, syncError: 'Backend unreachable — using local data.' });
-          return;
-        }
-        const businessId = skills.businessId;
-        const [custom, biz, brain] = await Promise.all([
-          tryApi(() => api.customSkills(businessId)),
-          tryApi(() => api.currentBusiness()),
-          tryApi(() => api.brain(businessId)),
-        ]);
+export const useKonekStore = create<KonekState>()((set, get) => ({
+  hydrated: false,
+  loadError: null,
 
-        set({
-          businessId,
-          serverLive: skills.live,
-          hydrated: true,
-          syncError: null,
-          activeSkills: skills.skills.filter((s) => s.enabled).map((s) => s.id),
-          ...(custom ? { customSkills: custom.customSkills.map(fromServerCustomSkill) } : {}),
-          ...(brain ? { knowledge: brain.sources.map((s) => s.source) } : {}),
-          ...(biz?.business
-            ? {
-                profile: {
-                  name: biz.business.name,
-                  sells: biz.business.what_you_sell ?? '',
-                  price: biz.business.price ?? '',
-                },
-                goal: (biz.business.goal
-                  ? ((biz.business.goal[0].toUpperCase() + biz.business.goal.slice(1)) as Goal)
-                  : get().goal),
-                vibe: (VIBES.includes(biz.business.vibe as Vibe) ? (biz.business.vibe as Vibe) : get().vibe),
-                twilioNumber: biz.business.twilio_number ?? get().twilioNumber,
-                whatsapp: biz.business.whatsapp_enabled ?? get().whatsapp,
-              }
-            : {}),
-        });
-      },
+  hydrate: async () => {
+    const [bizRes, session] = await Promise.all([
+      tryApi(() => api.currentBusiness()),
+      tryApi(() => api.session()),
+    ]);
 
-      vibe: 'PRO CLOSER',
-      setVibe: (vibe) => {
-        set({ vibe });
-        const id = get().businessId;
-        if (id) void tryApi(() => api.updateBusiness(id, { vibe }));
-      },
-
-      activeSkills: ['booking', 'faq'],
-      toggleSkill: (id) => {
-        const wasOn = get().activeSkills.includes(id);
-        const next = wasOn
-          ? get().activeSkills.filter((x) => x !== id)
-          : [...get().activeSkills, id];
-        set({ activeSkills: next });
-        /* Write through; put the toggle back if the server rejects it. */
-        void api.toggleSkill(id, !wasOn, get().businessId ?? undefined).catch(() => {
-          set({ activeSkills: get().activeSkills.filter((x) => x !== id).concat(wasOn ? [id] : []) });
-        });
-      },
-      isSkillActive: (id) => get().activeSkills.includes(id),
-
-      customSkills: [
-        {
-          id: 'cs-seed-1',
-          name: 'Dubai Delivery Objection',
-          description:
-            "When the customer says it's expensive, mention we have 3-month installment and free delivery anywhere in Dubai.",
-          trigger: 'When customer says...',
-          vibe: 'PRO CLOSER',
-          createdAt: '2 days ago',
-        },
-      ],
-      addCustomSkill: (s) => {
-        const optimistic: CustomSkill = { ...s, id: `cs-${Date.now().toString(36)}`, createdAt: 'Just now' };
-        set((state) => ({ customSkills: [optimistic, ...state.customSkills] }));
-        void api
-          .createCustomSkill({
-            name: s.name,
-            description: s.description,
-            trigger_type: String(s.trigger),
-            vibe: s.vibe,
-            business_id: get().businessId ?? undefined,
-          })
-          .then((r) =>
-            /* Swap the optimistic row for the stored one so Delete hits a real id. */
-            set((state) => ({
-              customSkills: state.customSkills.map((c) =>
-                c.id === optimistic.id ? fromServerCustomSkill(r.customSkill) : c
-              ),
-            }))
-          )
-          .catch(() => {});
-      },
-      updateCustomSkill: (id, patch) =>
-        set((state) => ({
-          customSkills: state.customSkills.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-        })),
-      removeCustomSkill: (id) => {
-        set((state) => ({ customSkills: state.customSkills.filter((c) => c.id !== id) }));
-        void tryApi(() => api.deleteCustomSkill(id));
-      },
-
-      profile: {
-        name: 'Nova Aesthetics',
-        sells: 'Skin treatments, facials and aftercare packages',
-        price: '₱2,500 – ₱12,800',
-      },
-      setProfile: (p) => {
-        set((s) => ({ profile: { ...s.profile, ...p } }));
-        const id = get().businessId;
-        if (!id) return;
-        clearTimeout(profileTimer);
-        profileTimer = setTimeout(() => {
-          const { name, sells, price } = get().profile;
-          void tryApi(() => api.updateBusiness(id, { name, what_you_sell: sells, price }));
-        }, 600);
-      },
-
-      knowledge: ['price-list-2025.pdf', 'services-menu.pdf', 'novaaesthetics.ph'],
-      addKnowledge: (name) =>
-        set((s) => (s.knowledge.includes(name) ? s : { knowledge: [...s.knowledge, name] })),
-      removeKnowledge: (name) => {
-        set((s) => ({ knowledge: s.knowledge.filter((k) => k !== name) }));
-        void tryApi(() => api.deleteBrainSource(name, get().businessId ?? undefined));
-      },
-      setKnowledge: (names) => set({ knowledge: names }),
-
-      goal: 'Book',
-      setGoal: (goal) => {
-        set({ goal });
-        const id = get().businessId;
-        if (id) void tryApi(() => api.updateBusiness(id, { goal: goal.toLowerCase() as 'explain' | 'book' | 'close' }));
-      },
-
-      twilioNumber: '+63 917 000 8642',
-      setTwilioNumber: (twilioNumber) => {
-        set({ twilioNumber });
-        const id = get().businessId;
-        if (id) void tryApi(() => api.updateBusiness(id, { twilio_number: twilioNumber }));
-      },
-      whatsapp: true,
-      setWhatsapp: (whatsapp) => {
-        set({ whatsapp });
-        const id = get().businessId;
-        if (id) void tryApi(() => api.updateBusiness(id, { whatsapp_enabled: whatsapp }));
-      },
-    }),
-    {
-      name: 'konek-ai-store',
-      /* Server-owned flags must never be restored from localStorage. */
-      partialize: (s) => {
-        const { hydrated, syncError, serverLive, businessId, ...rest } = s;
-        return rest as KonekState;
-      },
+    if (!bizRes?.business) {
+      set({ hydrated: true, loadError: 'Could not load your business. Is the database reachable?' });
+      return;
     }
-  )
-);
 
-let profileTimer: ReturnType<typeof setTimeout>;
+    const business = bizRes.business;
+    set({
+      business,
+      businessId: business.id,
+      vibe: vibeToKey(business.active_vibe),
+      unlocked: session?.unlocked ?? false,
+      unlockRequired: session?.unlockRequired ?? false,
+      liveCallsEnabled: session?.liveCallsEnabled ?? false,
+      hydrated: true,
+      loadError: null,
+    });
 
-function fromServerCustomSkill(c: ServerCustomSkill): CustomSkill {
-  return {
-    id: c.id,
-    name: c.name,
-    description: c.description ?? '',
-    trigger: c.trigger_type ?? 'When customer says...',
-    vibe: (VIBES.includes(c.vibe as Vibe) ? (c.vibe as Vibe) : 'PRO CLOSER'),
-    createdAt: relativeTime(c.created_at),
-  };
-}
+    await Promise.all([
+      get().loadOverview(), get().loadSkills(), get().loadBrain(),
+      get().loadCampaigns(), get().loadCalls(),
+    ]);
+  },
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(diff) || diff < 0) return 'Just now';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+  business: null,
+  businessId: null,
+
+  setBusinessField: async (patch) => {
+    const id = get().businessId;
+    if (!id) return;
+    const previous = get().business;
+    set({ business: previous ? { ...previous, ...patch } : previous }); // optimistic
+    try {
+      const { business } = await api.updateBusiness(id, patch);
+      set({ business, vibe: vibeToKey(business.active_vibe) });
+    } catch {
+      set({ business: previous }); // put it back
+      throw new Error('Could not save. Check your connection and try again.');
+    }
+  },
+
+  unlocked: false,
+  unlockRequired: false,
+  liveCallsEnabled: false,
+
+  refreshSession: async () => {
+    const s = await tryApi(() => api.session());
+    if (s) set({ unlocked: s.unlocked, unlockRequired: s.unlockRequired, liveCallsEnabled: s.liveCallsEnabled });
+  },
+
+  unlock: async (key) => {
+    await api.unlock(key);
+    await get().refreshSession();
+  },
+
+  stats: EMPTY_STATS,
+  recentCalls: [],
+  runningCampaigns: [],
+  setup: null,
+
+  loadOverview: async () => {
+    const res = await tryApi(() => api.overview(get().businessId ?? undefined));
+    if (!res) return;
+    set({
+      stats: res.stats,
+      recentCalls: res.recentCalls,
+      runningCampaigns: res.campaigns,
+      setup: res.setup,
+      ...(res.business ? { business: res.business } : {}),
+    });
+  },
+
+  skills: [],
+  loadSkills: async () => {
+    const res = await tryApi(() => api.skills(get().businessId ?? undefined));
+    if (res) set({ skills: res.skills });
+  },
+
+  toggleSkill: async (id) => {
+    const current = get().skills;
+    const target = current.find((s) => s.id === id);
+    if (!target) return;
+    const next = !target.is_active;
+    set({ skills: current.map((s) => (s.id === id ? { ...s, is_active: next } : s)) });
+    try {
+      await api.toggleSkill(id, next, get().businessId ?? undefined);
+    } catch {
+      set({ skills: current }); // revert
+    }
+  },
+
+  addSkill: async (input) => {
+    await api.createSkill(input, get().businessId ?? undefined);
+    await get().loadSkills();
+  },
+
+  removeSkill: async (id) => {
+    const before = get().skills;
+    set({ skills: before.filter((s) => s.id !== id) });
+    try {
+      await api.deleteSkill(id, get().businessId ?? undefined);
+    } catch {
+      set({ skills: before });
+    }
+  },
+
+  brain: null,
+  loadBrain: async () => {
+    const res = await tryApi(() => api.brain(get().businessId ?? undefined));
+    if (res) set({ brain: res.brain });
+  },
+
+  saveBrain: async (patch) => {
+    const before = get().brain;
+    set({ brain: before ? { ...before, ...patch } : before });
+    try {
+      const { brain } = await api.saveBrain({ ...patch, businessId: get().businessId ?? undefined });
+      set({ brain });
+    } catch {
+      set({ brain: before });
+      throw new Error('Could not save the Business Brain.');
+    }
+  },
+
+  campaigns: [],
+  loadCampaigns: async () => {
+    const res = await tryApi(() => api.campaigns(get().businessId ?? undefined));
+    if (res) set({ campaigns: res.campaigns });
+  },
+
+  calls: [],
+  loadCalls: async () => {
+    const res = await tryApi(() => api.calls(get().businessId ?? undefined));
+    if (res) set({ calls: res.calls });
+  },
+
+  vibe: 'PRO_CLOSER',
+  setVibe: async (v) => {
+    const vibe = vibeToKey(v);
+    set({ vibe });
+    await get().setBusinessField({ active_vibe: vibe });
+  },
+}));
+
+/** True when a failed request was rejected for want of the operator unlock. */
+export const needsUnlock = (err: unknown): boolean =>
+  Boolean((err as ApiError)?.needsUnlock);
