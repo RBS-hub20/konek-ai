@@ -167,12 +167,22 @@ language code are chosen together. This account has 417 English, 49 Hindi, 15
 Arabic and 8 Tagalog voices, so every language the dashboard offers has a
 native voice:
 
-| Language | Code | Default voice | Override |
-| --- | --- | --- | --- |
-| English | `en` | `Skylar` | `CARTESIA_VOICE_NAME` |
-| Tagalog / Taglish | `tl` | `Angel` | `CARTESIA_VOICE_TL` |
-| Arabic | `ar` | `Rania` | `CARTESIA_VOICE_AR` |
-| Hindi | `hi` | `Ishani` | `CARTESIA_VOICE_HI` |
+Verified against this account with `/tts-check` — all five produce ~5s of
+audio:
+
+| Language | Code | Model | Default voice | Override |
+| --- | --- | --- | --- | --- |
+| English | `en` | `sonic-2` | Skylar - Friendly Guide | `CARTESIA_VOICE_NAME` |
+| Tagalog | `tl` | `sonic-3` | Angel - Welcoming Host | `CARTESIA_VOICE_TL` |
+| Taglish | `tl` | `sonic-3` | Angel - Welcoming Host | `CARTESIA_VOICE_TL` |
+| Arabic | `ar` | `sonic-3` | Rania - Spirited Storyteller | `CARTESIA_VOICE_AR` |
+| Hindi | `hi` | `sonic-3` | Ishani - Thoughtful Responder | `CARTESIA_VOICE_HI` |
+
+**sonic-2 only speaks English here** — it rejects `tl`, `ar` and `hi` with
+"Invalid language for model", so those default to `sonic-3`. Override any of
+them with `CARTESIA_MODEL_TL`, `CARTESIA_MODEL_AR`, `CARTESIA_MODEL_HI`.
+If a language code is ever refused, the stream resends the utterance without
+the language field and lets the voice imply it, rather than losing the reply.
 
 Taglish uses a Tagalog voice, which handles the English words inside a Taglish
 sentence better than an English voice handles the Tagalog ones. Set
