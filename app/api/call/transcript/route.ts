@@ -1,6 +1,6 @@
 import { bumpCampaign, findCallByTwilioSid, updateCallLog, updateContactStatus } from '@/lib/server/tenant';
 import type { CallLog } from '@/lib/types2';
-import { fail, ok } from '@/lib/server/http';
+import { fail, ok, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
 
     return ok({ callId, updated: Boolean(updated), fields: Object.keys(patch) });
   } catch (err) {
-    return fail('Could not record call result', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not record call result', 500, describeError(err).detail);
   }
 }
 

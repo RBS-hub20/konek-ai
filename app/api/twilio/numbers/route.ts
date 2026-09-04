@@ -1,7 +1,7 @@
 import { getBusiness, listBusinesses, updateBusiness } from '@/lib/server/tenant';
 import { env, hasTwilio } from '@/lib/env';
 import { guardCall, toE164 } from '@/lib/server/operator';
-import { fail, ok, readJson } from '@/lib/server/http';
+import { fail, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,7 +56,7 @@ export async function GET(req: Request) {
 
     return ok(result);
   } catch (err) {
-    return fail('Could not read Twilio numbers', 502, err instanceof Error ? err.message : String(err));
+    return fail('Could not read Twilio numbers', 502, describeError(err).detail);
   }
 }
 
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
 
     return ok({ bought: true, phoneNumber: purchased.phoneNumber, sid: purchased.sid, assignedTo }, { status: 201 });
   } catch (err) {
-    return fail('Could not buy a number', 502, err instanceof Error ? err.message : String(err));
+    return fail('Could not buy a number', 502, describeError(err).detail);
   }
 }
 

@@ -1,5 +1,5 @@
 import { createCustomSkill, deleteSkill, getBusiness, listSkills, setSkillActive } from '@/lib/server/tenant';
-import { fail, handle, ok, readJson } from '@/lib/server/http';
+import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 import { hasSupabase } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     await setSkillActive(business.id, body.skillId, body.enabled);
     return ok({ skillId: body.skillId, enabled: body.enabled, businessId: business.id });
   } catch (err) {
-    return fail('Could not update skill', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not update skill', 500, describeError(err).detail);
   }
 }
 
@@ -58,6 +58,6 @@ export async function DELETE(req: Request) {
     await deleteSkill(business.id, id);
     return ok({ deleted: id });
   } catch (err) {
-    return fail('Could not delete skill', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not delete skill', 500, describeError(err).detail);
   }
 }

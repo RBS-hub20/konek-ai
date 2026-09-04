@@ -1,5 +1,5 @@
 import { env, hasStripe } from '@/lib/env';
-import { fail, ok, readJson } from '@/lib/server/http';
+import { fail, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
 
     return ok({ mock: false, plan: planId, url: session.url, sessionId: session.id });
   } catch (err) {
-    return fail('Could not create checkout session', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not create checkout session', 500, describeError(err).detail);
   }
 }
 

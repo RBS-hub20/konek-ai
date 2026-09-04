@@ -1,6 +1,6 @@
 import { getBusiness, listIntegrations, setIntegration } from '@/lib/server/tenant';
 import { env, hasCartesia, hasDeepgram, hasStripe, hasTwilio } from '@/lib/env';
-import { fail, handle, ok, readJson } from '@/lib/server/http';
+import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -74,6 +74,6 @@ export async function POST(req: Request) {
     const row = await setIntegration(business.id, body.provider, body.connected, body.apiKey);
     return ok({ integration: row });
   } catch (err) {
-    return fail('Could not update integration', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not update integration', 500, describeError(err).detail);
   }
 }

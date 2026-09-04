@@ -7,7 +7,7 @@ import { vibeConfig } from '@/lib/ai/vibes';
 import { vibeToKey } from '@/lib/types2';
 import { env, hasTwilio, hasCartesia, hasDeepgram } from '@/lib/env';
 import { guardCall, isValidPhone, toE164 } from '@/lib/server/operator';
-import { fail, handle, ok, readJson } from '@/lib/server/http';
+import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -135,7 +135,7 @@ export async function POST(req: Request) {
         mock = false;
       } catch (err) {
         status = 'Failed';
-        warning = err instanceof Error ? err.message : String(err);
+        warning = describeError(err).detail;
       }
     } else {
       warning = 'Twilio is not configured — the call was logged but nobody was dialled.';
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
       { status: status === 'Failed' ? 502 : 201 }
     );
   } catch (err) {
-    return fail('Could not place call', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not place call', 500, describeError(err).detail);
   }
 }
 

@@ -2,7 +2,7 @@ import { addBrain } from '@/lib/server/repo';
 import { addKnowledgeFile, getBusiness, removeKnowledgeFile } from '@/lib/server/tenant';
 import { db, hasSupabase } from '@/lib/supabase';
 import { hasOpenAI } from '@/lib/env';
-import { fail, ok } from '@/lib/server/http';
+import { fail, ok, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -113,7 +113,7 @@ export async function POST(req: Request) {
     void url;
     return fail('Send multipart/form-data or application/json', 415);
   } catch (err) {
-    return fail('Upload failed', 500, err instanceof Error ? err.message : String(err));
+    return fail('Upload failed', 500, describeError(err).detail);
   }
 }
 
@@ -128,7 +128,7 @@ export async function DELETE(req: Request) {
     const brain = await removeKnowledgeFile(business.id, name);
     return ok({ deleted: name, knowledge_files: brain.knowledge_files });
   } catch (err) {
-    return fail('Could not remove file', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not remove file', 500, describeError(err).detail);
   }
 }
 
@@ -172,6 +172,6 @@ async function fetchWebsiteText(u: string): Promise<{ text: string; error?: stri
         .slice(0, 40_000),
     };
   } catch (err) {
-    return { text: '', error: err instanceof Error ? err.message : String(err) };
+    return { text: '', error: describeError(err).detail };
   }
 }

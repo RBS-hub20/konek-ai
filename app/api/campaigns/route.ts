@@ -2,7 +2,7 @@ import {
   addContacts, createCampaign, deleteCampaign, getBusiness,
   listCampaigns, listContacts, updateCampaign,
 } from '@/lib/server/tenant';
-import { fail, handle, ok, readJson } from '@/lib/server/http';
+import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const campaigns = await listCampaigns(business.id);
     return ok({ campaign: campaigns.find((c) => c.id === campaign.id) ?? campaign, contactsAdded: added }, { status: 201 });
   } catch (err) {
-    return fail('Could not create campaign', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not create campaign', 500, describeError(err).detail);
   }
 }
 
@@ -62,7 +62,7 @@ export async function PATCH(req: Request) {
   try {
     return ok({ campaign: await updateCampaign(id, patch) });
   } catch (err) {
-    return fail('Could not update campaign', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not update campaign', 500, describeError(err).detail);
   }
 }
 
@@ -74,6 +74,6 @@ export async function DELETE(req: Request) {
     await deleteCampaign(id);
     return ok({ deleted: id });
   } catch (err) {
-    return fail('Could not delete campaign', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not delete campaign', 500, describeError(err).detail);
   }
 }

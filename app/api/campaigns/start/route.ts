@@ -1,7 +1,7 @@
 import { getBusiness, getCampaign, listContacts, updateCampaign } from '@/lib/server/tenant';
 import { guardCall } from '@/lib/server/operator';
 import { env } from '@/lib/env';
-import { fail, ok, readJson } from '@/lib/server/http';
+import { fail, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       } catch (err) {
         results.push({
           contactId: contact.id, phone: contact.phone, ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: describeError(err).detail,
         });
       }
       if (GAP_MS) await new Promise((r) => setTimeout(r, GAP_MS));
@@ -94,6 +94,6 @@ export async function POST(req: Request) {
       ...(remaining > 0 ? { note: `Dialled ${take.length} this run. Press Start again for the next ${BATCH}.` } : {}),
     });
   } catch (err) {
-    return fail('Could not start campaign', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not start campaign', 500, describeError(err).detail);
   }
 }

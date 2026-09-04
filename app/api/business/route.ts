@@ -1,6 +1,6 @@
 import { createBusiness, getBusiness, listBusinesses, listCallLogs, updateBusiness } from '@/lib/server/tenant';
 import type { Business } from '@/lib/types2';
-import { fail, handle, ok, readJson } from '@/lib/server/http';
+import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
   try {
     return ok({ business: await createBusiness(body) }, { status: 201 });
   } catch (err) {
-    return fail('Could not create business', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not create business', 500, describeError(err).detail);
   }
 }
 
@@ -53,6 +53,6 @@ export async function PATCH(req: Request) {
     void _ignored;
     return ok({ business: await updateBusiness(target.id, patch) });
   } catch (err) {
-    return fail('Could not update business', 500, err instanceof Error ? err.message : String(err));
+    return fail('Could not update business', 500, describeError(err).detail);
   }
 }
