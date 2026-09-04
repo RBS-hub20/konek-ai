@@ -1,6 +1,6 @@
 import {
   getBrain, listCallLogs, listCampaigns, listSkills, overviewStats,
-  resolveBusinessForCall, safe,
+  getBusinessForRead, safe,
 } from '@/lib/server/tenant';
 import { handle } from '@/lib/server/http';
 
@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const businessId = new URL(req.url).searchParams.get('businessId');
   return handle(async () => {
-    const { business, ephemeral } = await resolveBusinessForCall(businessId);
+    const { business, ephemeral } = await getBusinessForRead(businessId);
     if (!business) {
       return {
         business: null,

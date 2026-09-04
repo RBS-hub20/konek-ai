@@ -628,9 +628,41 @@ function fallbackBusiness(): Business {
 }
 
 /**
- * The tenant to place a call as. Never throws: if the businesses table is
- * missing, empty or unwritable, a working in-memory tenant is returned so the
- * phone still rings. Only the dashboard's persistence degrades, not the call.
+ * Read-only tenant lookup. NEVER writes — dashboard pages call this on every
+ * load, and an auto-creating read would mint a new business per request.
+ * Falls back to a synthetic tenant so a page can still render.
+ */
+export async function getBusinessForRead(id?: string | null): Promise<ResolvedBusiness> {
+  if (!hasSupabase) {
+    const b = await getBusiness(id);
+    return { business: b ?? fallbackBusiness(), ephemeral: !b };
+  }
+  try {
+    const q = db().from('businesses').select('*');
+    const { data, error } = id
+      ? await q.eq('id', id).limit(1).maybeSingle()
+      : await q.order('created_at', { ascending: true }).limit(1).maybeSingle();
+
+    if (!error && data) return { business: normalizeBusiness(data), ephemeral: false };
+    return {
+      business: fallbackBusiness(),
+      ephemeral: true,
+      note: error
+        ? `Could not read businesses: ${(error as PgError).message}`
+        : 'No business rows yet — run supabase.sql, or place a call to create the first tenant.',
+    };
+  } catch (err) {
+    return { business: fallbackBusiness(), ephemeral: true, note: describeErr(err) };
+  }
+}
+
+const describeErr = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The tenant to place a call as. May create the first tenant if the table is
+ * empty — only the call path is allowed to do that. Never throws: if the table
+ * is missing or unwritable a working in-memory tenant is returned, so the phone
+ * still rings and only persistence degrades.
  */
 export async function resolveBusinessForCall(id?: string | null): Promise<ResolvedBusiness> {
   if (!hasSupabase) {
@@ -669,7 +701,20 @@ export async function resolveBusinessForCall(id?: string | null): Promise<Resolv
     };
   }
 
-  /* 2 · Table exists but is empty — seed the default tenant inline. */
+  /* 2 · Table exists but looked empty — re-check, then seed once.
+     Two requests can race here; the second one finds the first one's row. */
+  try {
+    const { data: again } = await db()
+      .from('businesses')
+      .select('*')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (again) return { business: normalizeBusiness(again), ephemeral: false };
+  } catch {
+    /* fall through to the insert */
+  }
+
   const seed = fallbackBusiness();
   const { data, dropped, missingTable } = await insertResilient<Record<string, unknown>>(
     db(),

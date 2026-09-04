@@ -1,6 +1,6 @@
 import {
   addContacts, createCampaign, deleteCampaign, getBusiness,
-  listCampaigns, listContacts, resolveBusinessForCall, safe, updateCampaign,
+  listCampaigns, listContacts, getBusinessForRead, safe, updateCampaign,
 } from '@/lib/server/tenant';
 import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const p = new URL(req.url).searchParams;
   return handle(async () => {
-    const { business } = await resolveBusinessForCall(p.get('businessId'));
+    const { business } = await getBusinessForRead(p.get('businessId'));
 
     const id = p.get('id');
     if (id) {

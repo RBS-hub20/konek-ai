@@ -72,7 +72,7 @@ export async function POST(req: Request) {
           upsert: true,
         });
         if (error) {
-          storageWarning = `Storage upload failed: ${error.message}. Create a public bucket named "${BUCKET}" (supabase-v2.sql does this).`;
+          storageWarning = `Storage upload failed: ${error.message}. Create a public bucket named "${BUCKET}" (supabase.sql does this).`;
         } else {
           publicUrl = db().storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
         }

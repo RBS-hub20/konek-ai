@@ -285,6 +285,19 @@ begin
   end loop;
 end $$;
 
+-- ── 14b · Duplicate tenants (informational) ─────────────────────────
+-- Before this file existed, an empty businesses table could be seeded more
+-- than once. This does not delete anything; it just shows you any duplicates
+-- so you can remove the extras yourself:
+--
+--   select id, name, outbound_number, created_at from businesses order by created_at;
+--   delete from businesses where id = '<the newer duplicate id>';
+--
+-- After this file has run, the slug unique index prevents it recurring.
+update businesses set slug = 'nova-aesthetics'
+where slug is null
+  and id = (select id from businesses order by created_at asc limit 1);
+
 -- ── 15 · Reload PostgREST's schema cache ────────────────────────────
 -- Without this, new columns can still read as "not found in the schema cache".
 notify pgrst, 'reload schema';

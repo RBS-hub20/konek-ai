@@ -1,4 +1,4 @@
-/* Row shapes for the v2 multi-tenant schema (supabase-v2.sql). */
+/* Row shapes for the v2 multi-tenant schema (supabase.sql). */
 
 export const VIBE_KEYS = ['PRO_CLOSER', 'FRIENDLY_TITO', 'GEN_Z_HYPE', 'CALM_CARE'] as const;
 export type VibeKey = (typeof VIBE_KEYS)[number];

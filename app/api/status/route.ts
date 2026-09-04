@@ -49,7 +49,7 @@ export async function GET() {
       /* Status must answer even if the database is unreachable — but say why. */
       dbError = describeError(err).detail;
       warnings.push(
-        `Could not read the businesses table: ${dbError}. Run supabase-v2.sql in the Supabase SQL Editor.`
+        `Could not read the businesses table: ${dbError}. Run supabase.sql in the Supabase SQL Editor.`
       );
     }
 
@@ -87,7 +87,7 @@ export async function GET() {
       businesses,
       dbError,
       warnings: hasSupabase && !dbError && businesses.length === 0
-        ? [...warnings, 'The businesses table is empty. Run supabase-v2.sql — it bootstraps the first tenant.']
+        ? [...warnings, 'The businesses table is empty. Run supabase.sql — it bootstraps the first tenant.']
         : warnings,
       note: hasSupabase
         ? 'Connected to Supabase.'
