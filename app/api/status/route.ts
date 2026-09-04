@@ -10,6 +10,7 @@ import {
   hasTwilio,
   isVercel,
   serviceStatus,
+  usingDefaultBridge,
 } from '@/lib/env';
 import { ok, describeError } from '@/lib/server/http';
 import { listBusinesses } from '@/lib/server/tenant';
@@ -78,6 +79,13 @@ export async function GET() {
       /* True when live calls are actually permitted right now. */
       liveCallsEnabled: hasTwilio && Boolean(env.apiSecret),
       appUrl: env.appUrl,
+      /* Twilio dials this websocket; the browser never touches it. */
+      mediaStream: {
+        url: env.mediaStreamUrl,
+        source: env.mediaStreamSource,
+        usingDefault: usingDefaultBridge,
+        checkWith: '/api/bridge/health',
+      },
       deployment: {
         vercel: isVercel,
         region: process.env.VERCEL_REGION ?? null,

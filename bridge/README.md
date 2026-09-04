@@ -43,7 +43,7 @@ OpenAI accepts — so nothing is resampled and latency stays conversational.
    | Variable | Value |
    | --- | --- |
    | `OPENAI_API_KEY` | the same key that is in Vercel |
-   | `KONEK_API_SECRET` | **exactly** the same value as in Vercel |
+   | `KONEK_API_SECRET` | **exactly** the same value as in Vercel — without it the bridge cannot read `/api/call/config`, and Kai answers with no knowledge of your business |
    | `KONEK_APP_URL` | `https://konek-ai.vercel.app` |
 
    Optional: `OPENAI_REALTIME_MODEL` (default `gpt-realtime`),
@@ -61,19 +61,30 @@ OpenAI accepts — so nothing is resampled and latency stays conversational.
    { "ok": true, "openaiConfigured": true, "apiSecretConfigured": true }
    ```
 
-6. Back in **Vercel → Settings → Environment Variables**, add:
+6. Back in **Vercel → Settings → Environment Variables**, add either:
 
    ```
-   MEDIA_STREAM_URL = wss://<your-railway-domain>/media-stream
+   MEDIA_STREAM_URL      = wss://<your-railway-domain>/media-stream
+   NEXT_PUBLIC_BRIDGE_URL = https://<your-railway-domain>
    ```
 
-   `wss://`, not `https://`. Then **redeploy** — env changes do not apply to an
-   existing deployment.
+   Both are accepted — an `https://` base is converted to `wss://` and
+   `/media-stream` is appended. `MEDIA_STREAM_URL` wins if both are set.
+   Then **redeploy**; env changes do not apply to an existing deployment.
 
-7. Confirm the app switched over:
+   If neither is set the app falls back to a built-in default pointing at
+   `konek-ai-production.up.railway.app`, so calls keep working — but pin it
+   explicitly so a Railway domain change cannot silently break dialling.
+
+7. Confirm both halves can see each other — this checks from Vercel's own
+   network and flags a mismatched secret or app URL:
 
    ```bash
-   curl https://konek-ai.vercel.app/api/status | grep mediaBridge
+   curl https://konek-ai.vercel.app/api/bridge/health
+   ```
+
+   ```jsonc
+   { "reachable": true, "mediaStreamUrl": "wss://.../media-stream", "warnings": [] }
    ```
 
 Once `MEDIA_STREAM_URL` is set, `/api/call` emits

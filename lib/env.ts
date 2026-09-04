@@ -10,6 +10,43 @@ function read(name: string): string {
   return t;
 }
 
+/* The deployed Railway bridge. Used when nothing is configured, so a fresh
+   deploy has working two-way calls without a dashboard step. Override it with
+   MEDIA_STREAM_URL when the bridge moves. */
+const DEFAULT_BRIDGE = 'https://konek-ai-production.up.railway.app';
+
+/**
+ * Accepts any of MEDIA_STREAM_URL, NEXT_PUBLIC_BRIDGE_URL or BRIDGE_URL, in
+ * that order, and normalises whatever form it is given:
+ *   https://host            -> wss://host/media-stream
+ *   wss://host              -> wss://host/media-stream
+ *   wss://host/media-stream -> unchanged
+ */
+function resolveMediaStreamUrl(): { url: string; source: string } {
+  const candidates: [string, string][] = [
+    ['MEDIA_STREAM_URL', read('MEDIA_STREAM_URL')],
+    ['NEXT_PUBLIC_BRIDGE_URL', read('NEXT_PUBLIC_BRIDGE_URL')],
+    ['BRIDGE_URL', read('BRIDGE_URL')],
+  ];
+  for (const [source, value] of candidates) {
+    if (value) return { url: normalizeBridgeUrl(value), source };
+  }
+  return { url: normalizeBridgeUrl(DEFAULT_BRIDGE), source: 'built-in default' };
+}
+
+export function normalizeBridgeUrl(raw: string): string {
+  let v = raw.trim().replace(/\/+$/, '');
+  v = v.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+  if (!/^wss?:\/\//i.test(v)) v = `wss://${v}`;
+  /* Add the path only when one was not supplied. */
+  const withoutScheme = v.replace(/^wss?:\/\//i, '');
+  if (!withoutScheme.includes('/')) v = `${v}/media-stream`;
+  return v;
+}
+
+/* Resolved once at module load. */
+const MEDIA = resolveMediaStreamUrl();
+
 export const env = {
   supabaseUrl: read('NEXT_PUBLIC_SUPABASE_URL'),
   supabaseAnonKey: read('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
@@ -28,9 +65,10 @@ export const env = {
   openaiKey: read('OPENAI_API_KEY'),
 
   apiSecret: read('KONEK_API_SECRET'),
-  /* wss:// URL of the Railway/Fly media-stream bridge. When set, calls become
-     two-way conversations instead of a one-way spoken opener. */
-  mediaStreamUrl: read('MEDIA_STREAM_URL'),
+  /* Websocket the media bridge listens on. Twilio connects to it — the
+     browser never does — so this is read server-side only. */
+  mediaStreamUrl: MEDIA.url,
+  mediaStreamSource: MEDIA.source,
   appUrl: resolveAppUrl(),
 };
 
@@ -66,6 +104,7 @@ export const hasDeepgram = Boolean(env.deepgramKey);
 export const hasStripe = Boolean(env.stripeSecret);
 export const hasOpenAI = Boolean(env.openaiKey);
 export const hasMediaBridge = Boolean(env.mediaStreamUrl);
+export const usingDefaultBridge = env.mediaStreamSource === 'built-in default';
 
 /** What the API reports back so the UI can show what is live. */
 export function serviceStatus() {
@@ -99,13 +138,13 @@ export function configWarnings(): string[] {
       `NEXT_PUBLIC_APP_URL is not set — falling back to ${env.appUrl}. Set it to your production domain so Twilio callbacks and Stripe redirects are stable across deployments.`
     );
   }
-  if (hasTwilio && !hasMediaBridge) {
+  if (usingDefaultBridge) {
     w.push(
-      'MEDIA_STREAM_URL is not set — calls speak the opener and hang up. Deploy the bridge in ./bridge and set it to wss://<your-app>/media-stream for two-way conversation.'
+      `No bridge URL configured — falling back to the built-in default ${env.mediaStreamUrl}. Set MEDIA_STREAM_URL in Vercel to pin it.`
     );
   }
   if (hasMediaBridge && !/^wss:\/\//.test(env.mediaStreamUrl)) {
-    w.push(`MEDIA_STREAM_URL must start with wss:// — got "${env.mediaStreamUrl}".`);
+    w.push(`The bridge URL must resolve to wss:// — got "${env.mediaStreamUrl}".`);
   }
   if (hasTwilio && env.appUrl.includes('localhost')) {
     w.push('NEXT_PUBLIC_APP_URL points at localhost — Twilio cannot reach it. Use a public URL (ngrok locally).');
