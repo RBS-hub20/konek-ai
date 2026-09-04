@@ -46,7 +46,26 @@ export async function GET() {
       warnings.push(`The bridge points at ${body.appUrl}, not ${env.appUrl}. Check KONEK_APP_URL on Railway.`);
     }
 
-    return ok({ ...base, reachable: true, bridge: body, warnings });
+    /* Text-to-speech runs on the bridge, not here, so report its view of it. */
+    const tts = body.tts as
+      | { provider?: string; requested?: string; voiceResolved?: string; voiceName?: string }
+      | undefined;
+    if (tts?.requested === 'cartesia' && tts.provider !== 'cartesia') {
+      warnings.push('TTS_PROVIDER is cartesia but CARTESIA_API_KEY is missing on the bridge — calls use the OpenAI voice.');
+    }
+    if (tts?.provider === 'cartesia' && tts.voiceResolved === 'unresolved') {
+      warnings.push(
+        `Cartesia could not resolve the voice "${tts.voiceName}". Check the key, or list what is available at ${httpUrl.replace('/health', '/voices')}.`
+      );
+    }
+
+    return ok({
+      ...base,
+      reachable: true,
+      bridge: body,
+      ttsCheckUrl: httpUrl.replace('/health', '/tts-check'),
+      warnings,
+    });
   } catch (err) {
     return ok({
       ...base,

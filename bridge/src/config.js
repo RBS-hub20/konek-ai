@@ -19,6 +19,18 @@ export const config = {
   appUrl: read('KONEK_APP_URL', 'https://konek-ai.vercel.app').replace(/\/$/, ''),
   apiSecret: read('KONEK_API_SECRET'),
 
+  /* Text-to-speech. 'cartesia' routes model text through Sonic; 'openai'
+     keeps the realtime speech-to-speech voice. */
+  ttsProvider: read('TTS_PROVIDER', 'openai').toLowerCase(),
+  cartesiaKey: read('CARTESIA_API_KEY'),
+  cartesiaModel: read('CARTESIA_MODEL', 'sonic-2'),
+  cartesiaVoiceName: read('CARTESIA_VOICE_NAME', 'Skylar'),
+  cartesiaVoiceId: read('CARTESIA_VOICE_ID'),
+  cartesiaVersion: read('CARTESIA_VERSION', '2024-06-10'),
+  cartesiaWsUrl: read('CARTESIA_WS_URL', 'wss://api.cartesia.ai/tts/websocket'),
+  /* Only sent when set — an unsupported control should not break synthesis. */
+  cartesiaSpeed: read('CARTESIA_SPEED', ''),
+
   /* Hard stop so a stuck call can never bill forever. */
   maxCallSeconds: Number(read('MAX_CALL_SECONDS', '600')),
 
@@ -35,9 +47,19 @@ export const VIBE_VOICES = {
 
 export const voiceForVibe = (style) => VIBE_VOICES[style] ?? 'alloy';
 
+/** True when Sonic should synthesize instead of OpenAI's own voice. */
+export const useCartesia = () =>
+  config.ttsProvider === 'cartesia' && Boolean(config.cartesiaKey);
+
 export function assertConfig() {
   const missing = [];
   if (!config.openaiKey) missing.push('OPENAI_API_KEY');
+  if (config.ttsProvider === 'cartesia' && !config.cartesiaKey) {
+    /* Not fatal: fall back to the OpenAI voice rather than refusing to boot. */
+    console.warn(
+      '[KONEK AI] TTS_PROVIDER=cartesia but CARTESIA_API_KEY is missing — falling back to the OpenAI voice.'
+    );
+  }
   if (missing.length) {
     throw new Error(
       `Missing required environment variable(s): ${missing.join(', ')}. ` +

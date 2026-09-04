@@ -44,8 +44,18 @@ OpenAI accepts — so nothing is resampled and latency stays conversational.
    | `KONEK_API_SECRET` | **exactly** the same value as in Vercel — without it the bridge cannot read `/api/call/config`, and Kai answers with no knowledge of your business |
    | `KONEK_APP_URL` | `https://konek-ai.vercel.app` |
 
-   Optional: `OPENAI_REALTIME_MODEL` (default `gpt-realtime`),
-   `MAX_CALL_SECONDS` (default `600`), `LOG_LEVEL=debug` while testing.
+   For Cartesia Sonic instead of the OpenAI voice, add:
+
+   | Variable | Value |
+   | --- | --- |
+   | `TTS_PROVIDER` | `cartesia` |
+   | `CARTESIA_API_KEY` | your Cartesia key |
+   | `CARTESIA_MODEL` | `sonic-2` (default) |
+   | `CARTESIA_VOICE_NAME` | `Skylar` (default) — looked up by name at boot |
+
+   Optional: `CARTESIA_VOICE_ID` to pin an exact voice, `CARTESIA_SPEED`,
+   `OPENAI_REALTIME_MODEL` (default `gpt-realtime`), `MAX_CALL_SECONDS`
+   (default `600`), `LOG_LEVEL=debug` while testing.
 
 4. **Settings → Networking → Generate Domain.** Railway gives you something
    like `konek-ai-bridge-production.up.railway.app`.
@@ -111,6 +121,50 @@ OPENAI_API_KEY=sk-... KONEK_API_SECRET=... KONEK_APP_URL=http://localhost:3000 n
 
 To let Twilio reach it, expose it with `ngrok http 8080` and set
 `MEDIA_STREAM_URL=wss://<ngrok-host>/media-stream`.
+
+## Text to speech
+
+With `TTS_PROVIDER=cartesia` the pipeline changes shape. OpenAI still listens
+and thinks, but stops speaking: the realtime session runs text-only and each
+text fragment is streamed to Sonic, which returns 8 kHz mu-law — Twilio's own
+format, so nothing is resampled.
+
+```
+caller audio ─► OpenAI realtime (STT + LLM, text out) ─► Cartesia Sonic ─► caller
+```
+
+Text is flushed to Sonic at sentence boundaries so speech starts before the
+model has finished writing. On barge-in the utterance is abandoned and late
+audio from it is dropped, so the tail of an interrupted sentence cannot talk
+over the caller.
+
+Two endpoints make this checkable without placing a call:
+
+```bash
+curl https://<bridge>/tts-check                    # synthesizes one Taglish line
+curl https://<bridge>/tts-check?language=AR        # or Arabic
+curl https://<bridge>/voices                       # what this account can use
+```
+
+`/tts-check` returns the bytes produced and roughly how many seconds of audio
+that is. If Sonic is misconfigured it returns the actual Cartesia error.
+
+**If Cartesia fails at any point the call does not drop** — the bridge logs the
+reason and finishes with the OpenAI voice.
+
+### Pauses and pronunciation
+
+Sonic breathes on punctuation, so the model's own commas do most of the work.
+The bridge only fixes what would otherwise be read badly: it adds a comma after
+a Taglish greeting particle when a name follows (`Hi po Renmar` → `Hi po,
+Renmar`), reads number ranges as "2500 to 12800" rather than a subtraction, and
+guarantees a terminal mark so the last word is not clipped. It deliberately does
+not insert pauses around every `po` — mid-phrase `po` takes no pause, and a
+comma in the wrong place sounds worse than none.
+
+Sonic has no Filipino voice, so Tagalog and Taglish are synthesized with the
+English voice. That works because the sentence frame of Taglish is largely
+English; pure Tagalog will carry an English accent.
 
 ## What it does during a call
 

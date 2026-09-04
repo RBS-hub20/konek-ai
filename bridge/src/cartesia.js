@@ -1,0 +1,268 @@
+import WebSocket from 'ws';
+import { config } from './config.js';
+import { log } from './log.js';
+
+/* ═══════════════════════════════════════════════════════════════════
+   Cartesia Sonic text-to-speech.
+
+   Sonic can emit raw 8 kHz mu-law, which is exactly what Twilio wants,
+   so synthesized audio goes straight down the phone with no resampling.
+
+   The voice is resolved by NAME at startup rather than hardcoded, so a
+   renamed or re-issued voice id cannot silently break every call.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const REST = 'https://api.cartesia.ai';
+
+const headers = () => ({
+  'X-API-Key': config.cartesiaKey,
+  'Cartesia-Version': config.cartesiaVersion,
+  'Content-Type': 'application/json',
+});
+
+let cachedVoice = null;
+
+/**
+ * Finds the configured voice. An explicit CARTESIA_VOICE_ID wins; otherwise the
+ * voice list is searched for CARTESIA_VOICE_NAME (default "Skylar"), falling
+ * back to any English voice so a name change degrades instead of failing.
+ */
+export async function resolveVoice() {
+  if (cachedVoice) return cachedVoice;
+
+  if (config.cartesiaVoiceId) {
+    cachedVoice = { id: config.cartesiaVoiceId, name: '(from CARTESIA_VOICE_ID)', source: 'env' };
+    return cachedVoice;
+  }
+
+  try {
+    const res = await fetch(`${REST}/voices/`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`${res.status} ${body.slice(0, 200)}`);
+    }
+    const payload = await res.json();
+    const voices = Array.isArray(payload) ? payload : (payload.data ?? []);
+    if (!voices.length) throw new Error('the voice list came back empty');
+
+    const wanted = config.cartesiaVoiceName.toLowerCase();
+    const byName = voices.find((v) => String(v.name ?? '').toLowerCase() === wanted)
+      ?? voices.find((v) => String(v.name ?? '').toLowerCase().includes(wanted));
+
+    const chosen = byName
+      ?? voices.find((v) => String(v.language ?? '').startsWith('en'))
+      ?? voices[0];
+
+    cachedVoice = {
+      id: chosen.id,
+      name: chosen.name ?? 'unknown',
+      source: byName ? 'matched by name' : `"${config.cartesiaVoiceName}" not found — fell back to ${chosen.name}`,
+    };
+    log.info('cartesia', `voice: ${cachedVoice.name} (${cachedVoice.id}) — ${cachedVoice.source}`);
+    return cachedVoice;
+  } catch (err) {
+    log.error('cartesia', `could not resolve a voice: ${err.message}`);
+    return null;
+  }
+}
+
+/** For diagnostics: the first page of available voices. */
+export async function listVoices(limit = 40) {
+  const res = await fetch(`${REST}/voices/`, { headers: headers(), signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new Error(`${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+  const payload = await res.json();
+  const voices = Array.isArray(payload) ? payload : (payload.data ?? []);
+  return voices.slice(0, limit).map((v) => ({ id: v.id, name: v.name, language: v.language }));
+}
+
+/* ── Prosody shaping ─────────────────────────────────────────────── */
+
+/**
+ * Sonic takes its breathing from punctuation, so the model's own commas and
+ * full stops do most of the work. This only fixes what would otherwise be read
+ * badly, and stays deliberately conservative: a comma in the wrong place makes
+ * speech worse than no comma at all, and Tagalog "po" usually sits mid-phrase
+ * where a pause would be wrong.
+ */
+export function shapeForSpeech(text, language = 'EN') {
+  let t = String(text).replace(/\s+/g, ' ').trim();
+  if (!t) return t;
+
+  /* A greeting followed straight by a name is the one place a Filipino speaker
+     reliably breathes: "Hi po Renmar" -> "Hi po, Renmar". Anchored to the
+     start so it cannot fire mid-sentence. */
+  if (language === 'TL' || language === 'TAGLISH') {
+    t = t.replace(/^((?:hi|hello|hey|magandang (?:umaga|hapon|gabi|araw))\s+(?:po|ho))\s+(?=[A-Z])/i, '$1, ');
+  }
+
+  /* Ranges are read as a subtraction otherwise: "2500-12800" -> "2500 to 12800". */
+  t = t.replace(/(\d)\s*[-–]\s*(\d)/g, '$1 to $2');
+
+  /* Tidy anything doubled up, and never leave a space before punctuation. */
+  t = t.replace(/,\s*,/g, ',').replace(/\s+([,.?!])/g, '$1');
+
+  /* Without a terminal mark Sonic clips the last word. */
+  if (!/[.?!…]$/.test(t)) t += '.';
+  return t;
+}
+
+/* ── Streaming synthesis ─────────────────────────────────────────── */
+
+/**
+ * One synthesis stream for one call. Text arrives in pieces as the model
+ * generates it; audio comes back as base64 mu-law and is handed to `onAudio`.
+ *
+ * Every chunk is tagged with the generation it belongs to. On barge-in the
+ * generation is bumped, and late audio from the abandoned reply is dropped
+ * instead of talking over the caller.
+ */
+export class CartesiaStream {
+  constructor({ language = 'EN', onAudio, onError }) {
+    this.language = language;
+    this.onAudio = onAudio;
+    this.onError = onError;
+    this.ws = null;
+    this.ready = false;
+    this.voice = null;
+    this.generation = 0;
+    this.contextId = null;
+    this.pending = '';
+    this.queue = [];
+  }
+
+  async connect() {
+    this.voice = await resolveVoice();
+    if (!this.voice) throw new Error('no Cartesia voice available');
+
+    const url =
+      `${config.cartesiaWsUrl}?api_key=${encodeURIComponent(config.cartesiaKey)}` +
+      `&cartesia_version=${encodeURIComponent(config.cartesiaVersion)}`;
+
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      this.ws = ws;
+      const timer = setTimeout(() => reject(new Error('Cartesia connect timed out')), 10_000);
+
+      ws.on('open', () => {
+        clearTimeout(timer);
+        this.ready = true;
+        log.info('cartesia', `connected (${config.cartesiaModel}, voice ${this.voice.name})`);
+        resolve();
+      });
+      ws.on('message', (raw) => this.onMessage(raw));
+      ws.on('error', (err) => {
+        clearTimeout(timer);
+        this.ready = false;
+        log.error('cartesia', `socket error: ${err.message}`);
+        this.onError?.(err);
+        reject(err);
+      });
+      ws.on('close', (code) => {
+        this.ready = false;
+        log.info('cartesia', `closed (${code})`);
+      });
+    });
+  }
+
+  onMessage(raw) {
+    let evt;
+    try {
+      evt = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+
+    if (evt.type === 'chunk' && evt.data) {
+      /* Ignore audio for a reply the caller already interrupted. */
+      if (evt.context_id && evt.context_id !== this.contextId) return;
+      this.onAudio?.(evt.data);
+      return;
+    }
+    if (evt.type === 'error') {
+      log.error('cartesia', `api error: ${evt.error ?? JSON.stringify(evt).slice(0, 200)}`);
+      this.onError?.(new Error(String(evt.error ?? 'Cartesia error')));
+      return;
+    }
+    if (evt.type === 'done') {
+      log.debug('cartesia', 'utterance done');
+    }
+  }
+
+  /** Starts a fresh utterance; anything still playing is abandoned. */
+  begin() {
+    this.generation += 1;
+    this.contextId = `ctx-${this.generation}-${Date.now().toString(36)}`;
+    this.pending = '';
+  }
+
+  /** Buffers model text and flushes it at natural boundaries. */
+  push(delta) {
+    if (!this.ready) return;
+    this.pending += delta;
+    /* Flush on sentence ends, or when the buffer is long enough that waiting
+       would be heard as a gap. */
+    const boundary = /[.?!…,]\s|[.?!…]$/.test(this.pending);
+    if (boundary || this.pending.length >= 90) this.flush(true);
+  }
+
+  flush(more) {
+    const text = this.pending.trim();
+    this.pending = '';
+    if (!text || !this.ready) return;
+    this.send(shapeForSpeech(text, this.language), more);
+  }
+
+  /** Signals the end of the reply so Sonic renders the final phrase. */
+  end() {
+    this.flush(false);
+    if (this.ready && this.contextId) this.send('', false);
+  }
+
+  send(transcript, more) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const body = {
+      model_id: config.cartesiaModel,
+      transcript,
+      voice: { mode: 'id', id: this.voice.id },
+      output_format: {
+        /* Twilio's native format — no resampling anywhere in the path. */
+        container: 'raw',
+        encoding: 'pcm_mulaw',
+        sample_rate: 8000,
+      },
+      language: cartesiaLanguage(this.language),
+      context_id: this.contextId,
+      continue: Boolean(more),
+      add_timestamps: false,
+    };
+    if (config.cartesiaSpeed) {
+      body.voice.__experimental_controls = { speed: config.cartesiaSpeed };
+    }
+    try {
+      this.ws.send(JSON.stringify(body));
+    } catch (err) {
+      log.warn('cartesia', `send failed: ${err.message}`);
+    }
+  }
+
+  close() {
+    try { this.ws?.close(); } catch { /* already gone */ }
+    this.ready = false;
+  }
+}
+
+/** KONEK language keys to Cartesia language codes. */
+export function cartesiaLanguage(key) {
+  switch (key) {
+    case 'AR': return 'ar';
+    case 'HI': return 'hi';
+    /* Sonic has no Filipino; English carries Taglish acceptably because most
+       of the sentence frame is English anyway. */
+    case 'TL':
+    case 'TAGLISH':
+    default: return 'en';
+  }
+}
