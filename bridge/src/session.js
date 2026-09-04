@@ -15,7 +15,7 @@ import { CartesiaStream } from './cartesia.js';
    The call stays up until someone hangs up or MAX_CALL_SECONDS is hit.
    ═══════════════════════════════════════════════════════════════════ */
 
-const SEEN_EVENTS = new Set();
+export const SEEN_EVENTS = new Set();
 
 export class CallSession {
   constructor(twilioWs) {

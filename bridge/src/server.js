@@ -2,7 +2,8 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { config, assertConfig, useCartesia } from './config.js';
 import { log, recentLogs } from './log.js';
-import { CallSession } from './session.js';
+import { CallSession, SEEN_EVENTS as SEEN_EVENT_TYPES } from './session.js';
+import { EventEmitter } from 'node:events';
 import { CartesiaStream, listVoices, resolveVoiceFor, shapeForSpeech } from './cartesia.js';
 
 /* The Railway service: an HTTP server for health checks, with a websocket
@@ -43,6 +44,19 @@ const server = http.createServer(async (req, res) => {
       }));
     } catch (err) {
       return json(res, 502, { error: 'Could not list voices', detail: err.message });
+    }
+  }
+
+  /* Runs the REAL call path against a stub Twilio socket and reports what
+     happened. Counts and event names only — no prompt or transcript text —
+     so it is safe to expose without the shared secret. */
+  if (url.pathname === '/call-probe') {
+    const language = (url.searchParams.get('language') ?? 'TAGLISH').toUpperCase();
+    const seconds = Math.min(Number(url.searchParams.get('seconds') ?? 12), 25);
+    try {
+      return json(res, 200, await callProbe(language, seconds));
+    } catch (err) {
+      return json(res, 502, { error: err.message });
     }
   }
 
@@ -94,6 +108,72 @@ const server = http.createServer(async (req, res) => {
 
   json(res, 404, { error: 'Not found', try: ['/health', '/voices', '/tts-check', 'wss://<host>/media-stream'] });
 });
+
+/**
+ * A stand-in for Twilio's websocket: accepts the events CallSession sends and
+ * counts the audio it would have played down the phone.
+ */
+class StubTwilio extends EventEmitter {
+  constructor() {
+    super();
+    this.readyState = 1; // OPEN
+    this.frames = 0;
+    this.bytes = 0;
+    this.firstFrameMs = null;
+    this.started = Date.now();
+  }
+  send(raw) {
+    let m;
+    try { m = JSON.parse(raw); } catch { return; }
+    if (m.event === 'media' && m.media?.payload) {
+      if (this.firstFrameMs === null) this.firstFrameMs = Date.now() - this.started;
+      this.frames += 1;
+      this.bytes += Buffer.from(m.media.payload, 'base64').length;
+    }
+  }
+  close() { this.readyState = 3; this.emit('close'); }
+}
+
+async function callProbe(language, seconds) {
+  const stub = new StubTwilio();
+  const session = new CallSession(stub);
+
+  stub.emit('message', Buffer.from(JSON.stringify({
+    event: 'start',
+    start: {
+      streamSid: 'MZprobe', callSid: `CAprobe-${Date.now()}`,
+      customParameters: { businessId: '', vibe: 'PRO_CLOSER', language, customerName: 'RENMAR' },
+    },
+  })));
+
+  /* Feed silence so the model is not waiting on an empty input buffer. */
+  let n = 0;
+  const feed = setInterval(() => {
+    stub.emit('message', Buffer.from(JSON.stringify({
+      event: 'media',
+      media: { timestamp: String(n++ * 20), payload: Buffer.alloc(160, 0xff).toString('base64') },
+    })));
+  }, 20);
+
+  await new Promise((r) => setTimeout(r, seconds * 1000));
+  clearInterval(feed);
+
+  const result = {
+    language,
+    ttsProvider: session.tts ? 'cartesia' : 'openai',
+    cartesiaConnected: Boolean(session.tts?.ready),
+    voice: session.tts?.voice ? { name: session.tts.voice.name, code: session.tts.voice.code, model: session.tts.model } : null,
+    openaiEventsSeen: [...SEEN_EVENT_TYPES],
+    textDeltas: session.textDeltas ?? 0,
+    audioFramesOut: stub.frames,
+    audioBytesOut: stub.bytes,
+    approxSecondsOut: Number((stub.bytes / 8000).toFixed(2)),
+    firstFrameMs: stub.firstFrameMs,
+    ttsFailed: session.ttsFailed,
+  };
+  try { session.end('Completed'); } catch { /* already closed */ }
+  return result;
+}
 
 /** Runs one short synthesis and counts the audio that comes back. */
 function ttsCheck(phrase, language, model, omitLanguage) {
