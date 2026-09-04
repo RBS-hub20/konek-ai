@@ -15,6 +15,8 @@ import { CartesiaStream } from './cartesia.js';
    The call stays up until someone hangs up or MAX_CALL_SECONDS is hit.
    ═══════════════════════════════════════════════════════════════════ */
 
+const SEEN_EVENTS = new Set();
+
 export class CallSession {
   constructor(twilioWs) {
     this.twilio = twilioWs;
@@ -210,8 +212,11 @@ export class CallSession {
       /* Cartesia path: the model produces text, Sonic turns it into speech. */
       case 'response.text.delta':
       case 'response.output_text.delta': {
-        if (!this.tts || !evt.delta) break;
+        if (!evt.delta) break;
+        if (!this.tts) { log.warn('bridge', 'text delta arrived but Sonic is not connected'); break; }
         if (evt.item_id) this.assistantItemId = evt.item_id;
+        this.textDeltas = (this.textDeltas ?? 0) + 1;
+        if (this.textDeltas === 1) log.info('bridge', 'first text delta -> Sonic');
         this.tts.push(evt.delta);
         break;
       }
@@ -248,7 +253,11 @@ export class CallSession {
         break;
 
       default:
-        log.debug('openai', `event ${evt.type}`);
+        /* Record each event type once so a renamed delta event is obvious. */
+        if (!SEEN_EVENTS.has(evt.type)) {
+          SEEN_EVENTS.add(evt.type);
+          log.info('openai', `first seen: ${evt.type}`);
+        }
         break;
     }
   }
@@ -256,6 +265,8 @@ export class CallSession {
   /** Writes one base64 mu-law chunk to Twilio and keeps the playhead bookkeeping. */
   playAudio(b64) {
     if (!this.streamSid) return;
+    this.audioFrames = (this.audioFrames ?? 0) + 1;
+    if (this.audioFrames === 1) log.info('bridge', `first audio frame out (${this.tts ? 'cartesia' : 'openai'})`);
     this.sendTwilio({ event: 'media', streamSid: this.streamSid, media: { payload: b64 } });
     if (this.responseStartTimestamp === null) {
       this.responseStartTimestamp = this.latestMediaTimestamp;

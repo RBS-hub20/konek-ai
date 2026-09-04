@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { config, assertConfig, useCartesia } from './config.js';
-import { log } from './log.js';
+import { log, recentLogs } from './log.js';
 import { CallSession } from './session.js';
 import { CartesiaStream, listVoices, resolveVoiceFor, shapeForSpeech } from './cartesia.js';
 
@@ -21,6 +21,16 @@ const json = (res, code, body) => {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+
+  /* Recent log lines, for diagnosing a deployed bridge. Behind the shared
+     secret because prompts and transcripts pass through the logs. */
+  if (url.pathname === '/logs') {
+    const key = req.headers['x-konek-key'] ?? url.searchParams.get('key');
+    if (!config.apiSecret || key !== config.apiSecret) {
+      return json(res, 401, { error: 'x-konek-key required' });
+    }
+    return json(res, 200, { lines: recentLogs(Number(url.searchParams.get('n') ?? 200)) });
+  }
 
   /* Which voices this account can use — for picking a better one by name. */
   if (url.pathname === '/voices') {
