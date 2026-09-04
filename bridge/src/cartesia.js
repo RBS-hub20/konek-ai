@@ -162,9 +162,14 @@ export function shapeForSpeech(text, language = 'EN') {
  * instead of talking over the caller.
  */
 export class CartesiaStream {
-  constructor({ language = 'EN', model = null, onAudio, onError }) {
+  constructor({ language = 'EN', model = null, omitLanguage = false, onAudio, onError }) {
     this.language = language;
     this.model = model || modelForLanguage(language);
+    /* Sonic's `language` field takes a fixed set of codes. A voice that speaks
+       a language outside that set still works — you just must not name the
+       language, and let the voice imply it. */
+    this.omitLanguage = omitLanguage;
+    this.lastTranscript = '';
     this.onAudio = onAudio;
     this.onError = onError;
     this.ws = null;
@@ -225,8 +230,19 @@ export class CartesiaStream {
       return;
     }
     if (evt.type === 'error') {
-      log.error('cartesia', `api error: ${evt.error ?? JSON.stringify(evt).slice(0, 200)}`);
-      this.onError?.(new Error(String(evt.error ?? 'Cartesia error')));
+      const message = String(evt.error ?? JSON.stringify(evt).slice(0, 200));
+
+      /* Retry once without the language field rather than losing the utterance:
+         the voice already carries its own language. */
+      if (/invalid language/i.test(message) && !this.omitLanguage) {
+        this.omitLanguage = true;
+        log.warn('cartesia', `"${this.voice?.code}" is not an accepted language code — retrying with the voice's own language`);
+        if (this.lastTranscript) this.send(this.lastTranscript, false);
+        return;
+      }
+
+      log.error('cartesia', `api error: ${message}`);
+      this.onError?.(new Error(message));
       return;
     }
     if (evt.type === 'done') {
@@ -266,6 +282,7 @@ export class CartesiaStream {
 
   send(transcript, more) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.lastTranscript = transcript;
     const body = {
       model_id: this.model,
       transcript,
@@ -276,12 +293,14 @@ export class CartesiaStream {
         encoding: 'pcm_mulaw',
         sample_rate: 8000,
       },
-      /* Must match the voice: Sonic rejects a language its voice cannot speak. */
-      language: this.voice.code ?? cartesiaLanguage(this.language),
       context_id: this.contextId,
       continue: Boolean(more),
       add_timestamps: false,
     };
+    /* Named only when Sonic accepts the code; otherwise the voice implies it. */
+    if (!this.omitLanguage) {
+      body.language = this.voice.code ?? cartesiaLanguage(this.language);
+    }
     if (config.cartesiaSpeed) {
       body.voice.__experimental_controls = { speed: config.cartesiaSpeed };
     }
