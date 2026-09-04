@@ -39,7 +39,10 @@ export function buildCallPrompt({
   );
 
   /* Language comes first: it governs every other instruction below. */
-  parts.push(`## LANGUAGE — ${lang.label}\n${lang.instruction}\nIf the customer switches language, follow them.`);
+  parts.push(
+    `## LANGUAGE — ${lang.label}\n${lang.instruction}\nIf the customer switches language, follow them.` +
+      (lang.deliveryNote ? `\n${lang.deliveryNote}` : '')
+  );
 
   parts.push(`## VOICE & TONE — ${v.label}\n${v.style}`);
 
@@ -69,6 +72,21 @@ export function buildCallPrompt({
         knowledge.join('\n\n')
     );
   }
+
+  /* Sonic speaks exactly what the model writes, so how the reply is written is
+     most of what separates a person from a robot. Punctuation is where the
+     voice breathes. */
+  parts.push(
+    '## HOW TO SPEAK\n' +
+      '- This is talking, not writing. Use contractions and everyday words.\n' +
+      '- One or two sentences per turn. Say a thing, then stop and let them answer.\n' +
+      '- Punctuate for breath: commas where you would pause, full stops where you would land.\n' +
+      '- Start some turns the way people do — "Okay so", "Right", "Got it", "Ah" — but not every turn.\n' +
+      '- React before you continue. If they say something, acknowledge it first.\n' +
+      '- Never read a list aloud. Offer two options at most.\n' +
+      '- Say numbers the way they are spoken: "twelve thousand eight hundred", not "12,800".\n' +
+      '- No bullet points, no markdown, no emoji, no stage directions.'
+  );
 
   parts.push(
     '## RULES\n' +

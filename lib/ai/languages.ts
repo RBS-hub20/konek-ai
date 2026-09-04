@@ -30,6 +30,8 @@ export interface LanguageConfig {
   twilioLang: string;
   /** True when Twilio has no real voice for it and the fallback is approximate. */
   fallbackApproximate?: boolean;
+  /** Extra delivery guidance, appended to the language instruction. */
+  deliveryNote?: string;
 }
 
 export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
@@ -42,6 +44,8 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
       'Speak English throughout. Use clear, natural, conversational English. Keep sentences short enough to say out loud.',
     twilioVoice: 'Polly.Matthew-Neural',
     twilioLang: 'en-US',
+    deliveryNote:
+      'Keep it relaxed and unhurried, the way you would talk to someone you already like.',
   },
   TL: {
     key: 'TL',
@@ -54,6 +58,8 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     twilioVoice: 'Polly.Joanna-Neural',
     twilioLang: 'en-US',
     fallbackApproximate: true,
+    deliveryNote:
+      'Gamitin ang "po" at "opo" nang natural — hindi sa bawat pangungusap. Maikli ang mga pangungusap, parang totoong usapan sa telepono.',
   },
   TAGLISH: {
     key: 'TAGLISH',
@@ -65,6 +71,8 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     twilioVoice: 'Polly.Joanna-Neural',
     twilioLang: 'en-US',
     fallbackApproximate: true,
+    deliveryNote:
+      'Switch between Tagalog and English mid-sentence the way Manila actually talks — "may available po kami this Thursday". Use "po" naturally, not in every sentence. Keep English for prices, dates and product names.',
   },
   AR: {
     key: 'AR',

@@ -169,6 +169,11 @@ export class CartesiaStream {
        a language outside that set still works — you just must not name the
        language, and let the voice imply it. */
     this.omitLanguage = omitLanguage;
+    /* Voice controls are dropped one at a time if the API rejects them, the
+       same way the language field is, so an unsupported knob costs a retry
+       rather than the whole utterance. */
+    this.omitSpeed = false;
+    this.omitEmotion = false;
     this.lastTranscript = '';
     this.onAudio = onAudio;
     this.onError = onError;
@@ -241,6 +246,19 @@ export class CartesiaStream {
         return;
       }
 
+      if (/speed/i.test(message) && !this.omitSpeed) {
+        this.omitSpeed = true;
+        log.warn('cartesia', 'speed control rejected — retrying without it');
+        if (this.lastTranscript) this.send(this.lastTranscript, false);
+        return;
+      }
+      if (/emotion|control/i.test(message) && !this.omitEmotion) {
+        this.omitEmotion = true;
+        log.warn('cartesia', 'emotion control rejected — retrying without it');
+        if (this.lastTranscript) this.send(this.lastTranscript, false);
+        return;
+      }
+
       log.error('cartesia', `api error: ${message}`);
       this.onError?.(new Error(message));
       return;
@@ -301,8 +319,18 @@ export class CartesiaStream {
     if (!this.omitLanguage) {
       body.language = this.voice.code ?? cartesiaLanguage(this.language);
     }
-    if (config.cartesiaSpeed) {
-      body.voice.__experimental_controls = { speed: config.cartesiaSpeed };
+
+    /* Slightly under natural pace reads as considered rather than rushed,
+       which is most of the difference between "robot" and "person". */
+    if (config.cartesiaSpeed !== '' && !this.omitSpeed) {
+      const n = Number(config.cartesiaSpeed);
+      body.speed = Number.isFinite(n) ? n : config.cartesiaSpeed;
+    }
+    if (config.cartesiaEmotion.length && !this.omitEmotion) {
+      body.voice.__experimental_controls = {
+        emotion: config.cartesiaEmotion,
+        ...(config.cartesiaSpeed !== '' && !this.omitSpeed ? { speed: config.cartesiaSpeed } : {}),
+      };
     }
     try {
       this.ws.send(JSON.stringify(body));

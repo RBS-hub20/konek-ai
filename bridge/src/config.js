@@ -31,8 +31,11 @@ export const config = {
   cartesiaVoiceId: read('CARTESIA_VOICE_ID'),
   cartesiaVersion: read('CARTESIA_VERSION', '2024-06-10'),
   cartesiaWsUrl: read('CARTESIA_WS_URL', 'wss://api.cartesia.ai/tts/websocket'),
-  /* Only sent when set — an unsupported control should not break synthesis. */
-  cartesiaSpeed: read('CARTESIA_SPEED', ''),
+  /* A touch under natural pace. Dropped automatically if Sonic rejects it. */
+  cartesiaSpeed: read('CARTESIA_SPEED', '0.95'),
+  /* Warmth without sounding performed. Comma-separated; empty disables. */
+  cartesiaEmotion: read('CARTESIA_EMOTION', 'positivity:high,curiosity:low')
+    .split(',').map((x) => x.trim()).filter(Boolean),
   /* Per-language voices — Sonic needs a voice that actually speaks the
      language, so these are chosen alongside the language code. */
   voiceTl: read('CARTESIA_VOICE_TL', 'Angel'),
