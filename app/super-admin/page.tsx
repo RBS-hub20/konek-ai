@@ -15,6 +15,8 @@ import { StatCard } from '@/components/ui/StatCard';
 import { Waveform } from '@/components/ui/Waveform';
 import { Field, Input, Select } from '@/components/ui/Input';
 import { api, tryApi } from '@/lib/apiClient';
+import { needsUnlock } from '@/lib/store';
+import { UnlockDialog } from '@/components/admin/UnlockDialog';
 import type { Business, CallLog } from '@/lib/types2';
 import { vibeToLabel } from '@/lib/types2';
 import { cn, formatCurrency, formatDuration, formatNumber } from '@/lib/utils';
@@ -42,6 +44,7 @@ export default function SuperAdminPage() {
   const [services, setServices] = useState<Record<string, boolean>>({});
   const [showNew, setShowNew] = useState(false);
   const [duplicates, setDuplicates] = useState(0);
+  const [schema, setSchema] = useState<{ healthy?: boolean; missingTables?: string[]; missingColumns?: string[] } | null>(null);
 
   const load = useCallback(async () => {
     const [res, status] = await Promise.all([
@@ -55,6 +58,7 @@ export default function SuperAdminPage() {
       setDuplicates((res as { duplicates?: number }).duplicates ?? 0);
     }
     if (status) setServices((status.services as Record<string, boolean>) ?? {});
+    setSchema(await tryApi(() => api.dbHealth()) as typeof schema);
     setLoading(false);
   }, []);
 
@@ -107,6 +111,24 @@ export default function SuperAdminPage() {
             </button>
           ))}
         </nav>
+
+        {schema && schema.healthy === false && (
+          <div className="mb-6 rounded-brand border border-line bg-surface p-4">
+            <div className="text-[13px] font-medium text-ink">Database schema is incomplete</div>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+              Writes silently drop columns that do not exist, which is why call durations read 0:00 and phone
+              numbers show as “—”: <code className="text-ink">call_logs.twilio_sid</code> is missing, so Twilio&apos;s
+              status callback has nothing to match the call against. Run{' '}
+              <code className="text-ink">supabase.sql</code> in the Supabase SQL Editor to fix it.
+            </p>
+            {Boolean(schema.missingTables?.length) && (
+              <p className="mt-2 text-[11px] text-muted">Missing tables: {schema.missingTables!.join(', ')}</p>
+            )}
+            {Boolean(schema.missingColumns?.length) && (
+              <p className="mt-1 text-[11px] text-muted">Missing columns: {schema.missingColumns!.join(', ')}</p>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center gap-3 py-20 text-[13px] text-muted">
@@ -166,6 +188,7 @@ function TenantsTable({ businesses, duplicates, onChanged, onNew }: {
   const [query, setQuery] = useState('');
   const [deduping, setDeduping] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showUnlock, setShowUnlock] = useState(false);
 
   const filtered = businesses.filter((b) => {
     const q = query.trim().toLowerCase();
@@ -193,13 +216,18 @@ function TenantsTable({ businesses, duplicates, onChanged, onNew }: {
       `Call logs, campaigns and contacts are moved to the surviving business first. This cannot be undone.`
     )) return;
 
+    await runDedupe();
+  };
+
+  const runDedupe = async () => {
     setDeduping(true); setNotice(null);
     try {
       const res = await api.dedupeRun();
       setNotice(`Removed ${res.removed} duplicate row(s). ${res.remaining} business${res.remaining === 1 ? '' : 'es'} left.`);
       await onChanged();
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Dedupe failed');
+      if (needsUnlock(err)) setShowUnlock(true);
+      else setNotice(err instanceof Error ? err.message : 'Dedupe failed');
     } finally {
       setDeduping(false);
     }
@@ -244,6 +272,8 @@ function TenantsTable({ businesses, duplicates, onChanged, onNew }: {
       </div>
 
       {notice && <p className="border-b border-line px-5 py-3 text-[12px] text-muted">{notice}</p>}
+
+      <UnlockDialog open={showUnlock} onClose={() => setShowUnlock(false)} onUnlocked={runDedupe} />
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[960px] text-left">
@@ -420,6 +450,7 @@ function NumberPool({ businesses, onChanged }: { businesses: Business[]; onChang
         </div>
 
         {notice && <p className="border-b border-line px-5 py-3 text-[12px] text-muted">{notice}</p>}
+
 
         {loading ? (
           <p className="px-5 py-10 text-center text-[13px] text-muted">Loading…</p>
