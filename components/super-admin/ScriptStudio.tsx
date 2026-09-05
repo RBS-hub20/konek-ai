@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Download, Play, Plus, Star, Trash2 } from 'lucide-react';
+import { Copy, Download, Loader2, Pause, Play, Plus, Star, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
@@ -35,7 +35,10 @@ export function ScriptStudio() {
   const [notice, setNotice] = useState<string | null>(null);
   const [filterIndustry, setFilterIndustry] = useState('all');
   const [filterVibe, setFilterVibe] = useState('all');
-  const [previewing, setPreviewing] = useState(false);
+  /* Which step is generating or playing, so each row can show its own state. */
+  const [busyStep, setBusyStep] = useState<string | null>(null);
+  const [playingStep, setPlayingStep] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
 
   const seed = async () => {
@@ -79,33 +82,68 @@ export function ScriptStudio() {
     }
   };
 
-  /* Speaks the opener with the script's own voice settings, so the pace being
-     chosen is the pace that gets heard. */
-  const preview = async () => {
+  /**
+   * Speaks one step with the script's own voice settings, so the pace being
+   * chosen is the pace that gets heard.
+   *
+   * The audio comes back as an MP3 blob rather than a URL the browser fetches
+   * itself: the call path produces 8 kHz mu-law, which only Chrome will play.
+   */
+  const hear = async (stepName: string) => {
     if (!editing) return;
-    const step = editing.script_steps?.find((s) => s.step === 'opener');
-    const isPh = editing.country !== 'AE';
-    const text = renderScript((isPh ? step?.text_ph : step?.text_ae) || step?.text_ph || '', SAMPLE);
-    if (!text) { setNotice('Write an opener first.'); return; }
+    const step = editing.script_steps?.find((s) => s.step === stepName);
+    const text = renderScript(stepText(step, editing.country), SAMPLE);
+    if (!text) { setNotice(`Write the ${stepName} first.`); return; }
 
-    setPreviewing(true); setNotice(null);
+    /* Stop whatever is already playing before starting another. */
+    audioRef.current?.pause();
+    setPlayingStep(null);
+    setBusyStep(stepName);
+    setNotice(null);
+
     try {
-      const bridge = await tryApi(() => api.bridgeHealth());
-      const base = (bridge?.healthUrl as string | undefined)?.replace('/health', '');
-      if (!base) { setNotice('The voice bridge is not reachable, so there is nothing to preview with.'); return; }
-      const url = `${base}/voice-sample?` + new URLSearchParams({
-        language: isPh ? 'TL' : 'EN',
-        text,
-        speed: String(editing.voice_settings?.speed ?? 0.92),
-      }).toString();
-      audioRef.current?.pause();
+      const res = await fetch('/api/outbound/preview-tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          speed: editing.voice_settings?.speed ?? 0.9,
+          emotion: editing.voice_settings?.emotion ?? 'professional',
+          country: editing.country,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || body.error || `Preview failed (${res.status})`);
+      }
+
+      const url = URL.createObjectURL(await res.blob());
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(url);
+
       const audio = new Audio(url);
       audioRef.current = audio;
-      await audio.play();
+      audio.onended = () => setPlayingStep(null);
+      audio.onerror = () => { setPlayingStep(null); setNotice('The browser could not play that audio.'); };
+
+      setBusyStep(null);
+      setPlayingStep(stepName);
+      await audio.play().catch(() => {
+        /* Some browsers refuse playback that starts after a network round
+           trip. The player below is the way out. */
+        setPlayingStep(null);
+        setNotice('Your browser blocked autoplay — press play on the bar below.');
+      });
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Could not play the preview');
-    } finally {
-      setPreviewing(false);
+      const message = err instanceof Error ? err.message : 'Could not generate the preview';
+      setNotice(
+        /CARTESIA/i.test(message)
+          ? `${message} — check CARTESIA_API_KEY in Vercel.`
+          : message
+      );
+      setBusyStep(null);
+      setPlayingStep(null);
     }
   };
 
@@ -319,14 +357,40 @@ export function ScriptStudio() {
                         />
                       </div>
                       {preview && (
-                        <p className="mt-3 rounded-brand bg-surface p-3 text-[12px] leading-relaxed text-muted">
-                          <span className="text-ink">Preview:</span> “{preview}”
-                        </p>
+                        <div className="mt-3 flex items-start gap-2 rounded-brand bg-surface p-3">
+                          <button
+                            type="button"
+                            onClick={() => void hear(name)}
+                            disabled={busyStep === name}
+                            aria-label={`Hear the ${name}`}
+                            title={`Hear the ${name}`}
+                            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line text-ink transition-colors hover:bg-paper focus-ring disabled:opacity-50"
+                          >
+                            {busyStep === name
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : playingStep === name
+                                ? <Pause className="h-3 w-3" />
+                                : <Play className="ml-0.5 h-3 w-3" />}
+                          </button>
+                          <p className="text-[12px] leading-relaxed text-muted">
+                            <span className="text-ink">Preview:</span> “{preview}”
+                          </p>
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
+
+              {previewUrl && (
+                <audio
+                  src={previewUrl}
+                  controls
+                  className="w-full"
+                  onPlay={() => setPlayingStep((p) => p ?? 'opener')}
+                  onEnded={() => setPlayingStep(null)}
+                />
+              )}
 
               <div className="flex flex-wrap gap-2 border-t border-line pt-4">
                 <Button size="sm" onClick={() => void save(false)} disabled={saving || locked}>
@@ -335,8 +399,16 @@ export function ScriptStudio() {
                 <Button size="sm" variant="secondary" onClick={() => void save(true)} disabled={saving}>
                   Save &amp; set default
                 </Button>
-                <Button size="sm" variant="secondary" className="gap-1.5" onClick={() => void preview()} disabled={previewing}>
-                  <Play className="h-3.5 w-3.5" /> {previewing ? 'Loading…' : 'Hear the opener'}
+                <Button
+                  size="sm" variant="secondary" className="gap-1.5"
+                  onClick={() => void hear('opener')}
+                  disabled={busyStep === 'opener'}
+                >
+                  {busyStep === 'opener'
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating preview…</>
+                    : playingStep === 'opener'
+                      ? <><Pause className="h-3.5 w-3.5" /> Playing…</>
+                      : <><Play className="h-3.5 w-3.5" /> Hear the opener</>}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Close</Button>
               </div>
