@@ -21,6 +21,47 @@ export interface PgError {
 
 const MAX_RETRIES = 25;
 
+/**
+ * 23502 — a NOT NULL column the code does not write. Common when a table was
+ * created before the code, under a different naming convention.
+ */
+export function notNullColumn(err: PgError | null | undefined): string | null {
+  if (!err) return null;
+  const msg = `${err.message ?? ''} ${err.details ?? ''}`;
+  if (err.code && err.code !== '23502' && !/not-null constraint/i.test(msg)) return null;
+  const m = msg.match(/null value in column "([^"]+)"/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Picks a value for a required column we were not going to write, by finding
+ * the field we do have that means the same thing: company_name from company,
+ * contact_name from contact_person, and so on.
+ */
+export function valueForRequired(column: string, row: Record<string, unknown>): unknown {
+  const target = column.toLowerCase();
+  const ALIASES: Record<string, string[]> = {
+    company_name: ['company', 'name'],
+    business_name: ['company', 'name'],
+    contact_name: ['contact_person', 'name'],
+    full_name: ['name', 'contact_person'],
+    phone_number: ['phone'],
+    mobile: ['phone'],
+    lead_name: ['company', 'name'],
+  };
+
+  for (const key of ALIASES[target] ?? []) {
+    const v = row[key];
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  /* Fall back to any field whose name is a part of the required one. */
+  for (const [key, v] of Object.entries(row)) {
+    if (v === undefined || v === null || v === '') continue;
+    if (target.includes(key) || key.includes(target)) return v;
+  }
+  return '';
+}
+
 /** PGRST205 / 42P01 — the table itself is not there. */
 export function isMissingTable(err: PgError | null | undefined): boolean {
   if (!err) return false;
@@ -83,6 +124,14 @@ export async function insertResilient<T = Record<string, unknown>>(
       }
       continue;
     }
+
+    /* A required column we were not writing — fill it from what we have. */
+    const required = notNullColumn(err);
+    if (required && !(required in payload)) {
+      payload[required] = valueForRequired(required, payload);
+      continue;
+    }
+
     return { data: null, dropped, missingTable: false, error: err };
   }
   return { data: null, dropped, missingTable: false, error: { message: 'Too many unknown columns' } };
@@ -148,6 +197,13 @@ export async function upsertResilient<T = Record<string, unknown>>(
       dropped.push(col);
       continue;
     }
+
+    const required = notNullColumn(err);
+    if (required && !(required in payload)) {
+      payload[required] = valueForRequired(required, payload);
+      continue;
+    }
+
     return { data: null, dropped, missingTable: false, error: err };
   }
   return { data: null, dropped, missingTable: false, error: { message: 'Too many unknown columns' } };
