@@ -164,6 +164,40 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
   return created;
 }
 
+/** Removes a tenant. Child rows are re-pointed by the caller first. */
+export async function deleteBusiness(id: string): Promise<void> {
+  if (!hasSupabase) {
+    const m = mem();
+    m.businesses = m.businesses.filter((b) => b.id !== id);
+    delete m.enabled[id];
+    m.brains = m.brains.filter((b) => b.business_id !== id);
+    m.campaigns = m.campaigns.filter((c) => c.business_id !== id);
+    m.contacts = m.contacts.filter((c) => c.business_id !== id);
+    m.callLogs = m.callLogs.filter((c) => c.business_id !== id);
+    m.integrations = m.integrations.filter((i) => i.business_id !== id);
+    return;
+  }
+  const { error } = await db().from('businesses').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** Moves every child row from one tenant to another, in memory. */
+export function reassignInMemory(fromId: string, toId: string): Record<string, number> {
+  const m = mem();
+  const moved: Record<string, number> = {};
+  const move = <T extends { business_id: string }>(rows: T[], name: string) => {
+    let n = 0;
+    for (const r of rows) if (r.business_id === fromId) { r.business_id = toId; n++; }
+    if (n) moved[name] = n;
+  };
+  move(m.callLogs as unknown as { business_id: string }[], 'call_logs');
+  move(m.campaigns as unknown as { business_id: string }[], 'campaigns');
+  move(m.contacts as unknown as { business_id: string }[], 'contacts');
+  move(m.brains as unknown as { business_id: string }[], 'business_brain');
+  move(m.integrations as unknown as { business_id: string }[], 'business_integrations');
+  return moved;
+}
+
 export async function incrementCallsUsed(businessId: string, by = 1) {
   const b = await getBusiness(businessId);
   if (!b) return;

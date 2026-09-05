@@ -1,5 +1,5 @@
 import { db, hasSupabase } from '@/lib/supabase';
-import { listBusinesses } from '@/lib/server/tenant';
+import { deleteBusiness, listBusinesses, reassignInMemory } from '@/lib/server/tenant';
 import type { Business } from '@/lib/types2';
 import { describeError, fail, ok, readJson } from '@/lib/server/http';
 import { isAuthorizedCaller } from '@/lib/server/operator';
@@ -85,11 +85,34 @@ export async function POST(req: Request) {
   if (!body?.confirm) {
     return fail('Pass { "confirm": true } to delete the duplicates. GET this URL first to see what would go.', 400);
   }
-  if (!hasSupabase) return fail('No database connected.', 503);
-
   try {
     const groups = findDuplicates(await listBusinesses());
     if (!groups.length) return ok({ removed: 0, note: 'No duplicates found.' });
+
+    /* Without a database the same merge runs against the in-process store, so
+       the flow is exercisable locally instead of only in production. */
+    if (!hasSupabase) {
+      const movedMem: Record<string, number> = {};
+      const removedMem: string[] = [];
+      for (const group of groups) {
+        for (const dupe of group.remove) {
+          for (const [k, v] of Object.entries(reassignInMemory(dupe.id, group.keep.id))) {
+            movedMem[k] = (movedMem[k] ?? 0) + v;
+          }
+          await deleteBusiness(dupe.id);
+          removedMem.push(dupe.id);
+        }
+      }
+      const left = await listBusinesses();
+      return ok({
+        removed: removedMem.length,
+        removedIds: removedMem,
+        movedChildRows: movedMem,
+        remaining: left.length,
+        mrr: left.reduce((s, b) => s + (b.mrr ?? 0), 0),
+        note: 'In-memory store (no database connected).',
+      });
+    }
 
     const moved: Record<string, number> = {};
     const removed: string[] = [];
