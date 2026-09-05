@@ -1,4 +1,5 @@
 import { db, hasSupabase } from '@/lib/supabase';
+import { isMissingTable } from '@/lib/server/resilient';
 import { describeError, ok } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,35 @@ const EXPECTED: Record<string, string[]> = {
  * to keep calls working, so a half-migrated table looks fine until you notice
  * every phone number is null — this makes that visible in one request.
  */
+/**
+ * Asks PostgREST for each column directly.
+ *
+ * Inferring columns from a sample row cannot see an empty table and misses a
+ * column whose value happens to be absent, so this selects the columns instead
+ * and reads the rejection: PostgREST names the offending column when it does
+ * not exist.
+ */
+async function inspect(table: string, expected: string[]) {
+  /* One request settles it when everything is present. */
+  const { error } = await db().from(table).select(expected.join(',')).limit(1);
+  if (!error) return { exists: true, missing: [] as string[] };
+
+  const err = error as { code?: string; message?: string };
+  if (isMissingTable(err)) return { exists: false, missing: expected, error: err.message };
+
+  /* Something is absent — find out exactly which, one column at a time. */
+  const missing: string[] = [];
+  const results = await Promise.all(
+    expected.map(async (col) => {
+      const { error: e } = await db().from(table).select(col).limit(1);
+      return [col, e ? (e as { message?: string }).message ?? 'error' : null] as const;
+    })
+  );
+  for (const [col, problem] of results) if (problem) missing.push(col);
+
+  return { exists: true, missing, error: missing.length ? undefined : err.message };
+}
+
 export async function GET() {
   if (!hasSupabase) {
     return ok({ connected: false, note: 'No Supabase credentials — running on in-memory data.' });
@@ -43,22 +73,16 @@ export async function GET() {
 
   for (const [table, expected] of Object.entries(EXPECTED)) {
     try {
-      const { data, error } = await db().from(table).select('*').limit(1);
-      if (error) {
-        tables[table] = { exists: false, error: describeError(error).detail };
+      const res = await inspect(table, expected);
+      if (!res.exists) {
+        tables[table] = { exists: false, error: res.error };
         missingTables.push(table);
         continue;
       }
-      const row = (data ?? [])[0];
-      if (!row) {
-        /* An empty table hides its shape, so only report reachability. */
-        tables[table] = { exists: true, rows: 0, columns: null, note: 'empty — column check needs at least one row' };
-        continue;
-      }
-      const present = Object.keys(row);
-      const missing = expected.filter((c) => !present.includes(c));
-      tables[table] = { exists: true, rows: '1+', columns: present.length, missing };
-      for (const c of missing) missingColumns.push(`${table}.${c}`);
+      /* Row count is useful context but no longer what the check depends on. */
+      const { count } = await db().from(table).select('*', { count: 'exact', head: true });
+      tables[table] = { exists: true, rows: count ?? null, missing: res.missing };
+      for (const c of res.missing) missingColumns.push(`${table}.${c}`);
     } catch (err) {
       tables[table] = { exists: false, error: describeError(err).detail };
       missingTables.push(table);
@@ -74,6 +98,8 @@ export async function GET() {
     tables,
     ...(healthy
       ? {}
-      : { fix: 'Run supabase.sql in the Supabase SQL Editor — it is additive and ends with NOTIFY pgrst.' }),
+      : {
+          fix: 'Run supabase.sql in the Supabase SQL Editor. If it has already been run, PostgREST may be holding a stale schema cache — run: notify pgrst, \'reload schema\';',
+        }),
   });
 }
