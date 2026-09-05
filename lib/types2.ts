@@ -195,3 +195,49 @@ export interface SalesSettings {
   backup_number: string | null;
   whisper: boolean;
 }
+
+/* ── Outbound scripts ───────────────────────────────────────────── */
+
+export const SCRIPT_STEPS = ['opener', 'discovery', 'pitch', 'close'] as const;
+export type ScriptStepName = (typeof SCRIPT_STEPS)[number];
+
+export const SCRIPT_INDUSTRIES = ['laundry', 'restaurant', 'cafe', 'salon', 'clinic', 'gym', 'generic'] as const;
+export const SCRIPT_VIBES = ['professional', 'friendly', 'aggressive', 'tita', 'enterprise', 'casual'] as const;
+export const SCRIPT_COUNTRIES = ['PH', 'AE', 'ALL'] as const;
+
+export interface ScriptStep {
+  step: ScriptStepName;
+  text_ph: string;
+  text_ae: string;
+  /** Silence after this step, rendered as sentence breaks for the voice. */
+  pause_ms: number;
+}
+
+export interface VoiceSettings {
+  speed: number;
+  emotion: string;
+  pause_ms: number;
+}
+
+export interface OutboundScript {
+  id: string;
+  name: string;
+  industry: string;
+  vibe: string;
+  country: string;
+  script_steps: ScriptStep[];
+  voice_settings: VoiceSettings;
+  is_active: boolean;
+  is_default: boolean;
+  created_at: string;
+}
+
+export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { speed: 0.92, emotion: 'professional', pause_ms: 400 };
+
+/** Fills {{company}}, {{contact}} and {{industry}} in a script line. */
+export function renderScript(text: string, vars: Record<string, string | null | undefined>): string {
+  return String(text ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => {
+    const v = vars[key];
+    return v ? String(v) : '';
+  }).replace(/\s{2,}/g, ' ').trim();
+}

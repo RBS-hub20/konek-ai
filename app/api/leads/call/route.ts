@@ -1,4 +1,5 @@
-import { getBusinessForRead, getLead, safe, updateLead } from '@/lib/server/tenant';
+import { getBusinessForRead, getLead, pickScript, safe, updateLead } from '@/lib/server/tenant';
+import { renderScript, type OutboundScript } from '@/lib/types2';
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
 import { guardCall } from '@/lib/server/operator';
 import { normalizePhone } from '@/lib/server/phone';
@@ -40,6 +41,16 @@ export async function POST(req: Request) {
       ? 'EN'
       : lead.country === 'PH' ? 'TAGLISH' : 'EN';
 
+    /* A written opener read at a steady pace is far easier to follow on a
+       phone line than one the model improvises. */
+    const script = await safe(() => pickScript(lead.industry, lead.country), null);
+    const vars = {
+      company: lead.company ?? 'your business',
+      contact: lead.contact_person ?? '',
+      industry: lead.industry ?? 'business',
+    };
+    const opener = openerFrom(script, lead.country, vars);
+
     let twilioSid: string | null = null;
     let status = 'Calling';
     let warning: string | undefined;
@@ -51,7 +62,11 @@ export async function POST(req: Request) {
         const call = await client.calls.create({
           to: phone,
           from: from!,
-          twiml: outboundTwiml(lead.company, lead.contact_person, language),
+          twiml: outboundTwiml({
+            company: lead.company, contact: lead.contact_person, language,
+            scriptId: script?.id ?? null, opener,
+            speed: script?.voice_settings?.speed ?? null,
+          }),
           statusCallback: `${env.appUrl}/api/call/transcript`,
           statusCallbackEvent: ['initiated', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
@@ -90,6 +105,8 @@ export async function POST(req: Request) {
         from,
         to: phone,
         language,
+        script: script ? { id: script.id, name: script.name, speed: script.voice_settings.speed } : null,
+        opener,
         mode: hasMediaBridge ? 'conversation' : 'opener-only',
         ...(warning ? { warning } : {}),
       },
@@ -121,18 +138,40 @@ function twilioHint(code: number | string | undefined | null, country: string | 
   }
 }
 
+/** The opener for this lead, from the script, in the right column. */
+function openerFrom(
+  script: OutboundScript | null,
+  country: string | null,
+  vars: Record<string, string>
+): string {
+  const step = script?.script_steps?.find((s) => s.step === 'opener');
+  if (step) {
+    const text = country === 'PH' ? step.text_ph : step.text_ae || step.text_ph;
+    const rendered = renderScript(text, vars);
+    if (rendered) return rendered;
+  }
+  const who = vars.contact ? `${vars.contact}, ` : '';
+  return `Good morning ${who}this is Cindy, from Konek A I. Do you have thirty seconds?`;
+}
+
 /**
  * Cindy's outbound TwiML. With the bridge configured this hands the call to
- * the media stream, which pulls her pitch and can transfer on interest.
+ * the media stream, which reads the script; without it, the opener is spoken
+ * directly so the call is still intelligible.
  */
-function outboundTwiml(company: string | null, contact: string | null, language: string): string {
+function outboundTwiml(o: {
+  company: string | null; contact: string | null; language: string;
+  scriptId: string | null; opener: string; speed: number | null;
+}): string {
   if (hasMediaBridge) {
     const params = [
       ['outbound', 'sales'],
-      ['company', company ?? ''],
-      ['contact', contact ?? ''],
-      ['language', language],
+      ['company', o.company ?? ''],
+      ['contact', o.contact ?? ''],
+      ['language', o.language],
       ['vibe', 'PRO_CLOSER'],
+      ['scriptId', o.scriptId ?? ''],
+      ['speed', o.speed != null ? String(o.speed) : ''],
     ]
       .filter(([, v]) => v)
       .map(([k, v]) => `<Parameter name="${k}" value="${escapeXml(String(v))}"/>`)
@@ -144,15 +183,11 @@ function outboundTwiml(company: string | null, contact: string | null, language:
     );
   }
 
-  const who = contact ? `${contact}, ` : '';
-  const line =
-    `Hi ${who}this is Cindy from KONEK A I. We build A I voice agents that call your customers and book them in. ` +
-    `Do you have thirty seconds?`;
   return (
     `<?xml version="1.0" encoding="UTF-8"?><Response>` +
-    `<Say voice="Polly.Joanna-Neural">${escapeXml(line)}</Say>` +
+    `<Say voice="Polly.Joanna-Neural">${escapeXml(o.opener)}</Say>` +
     `<Pause length="1"/>` +
-    `<Say voice="Polly.Joanna-Neural">${escapeXml('I will have someone follow up. Thanks for your time.')}</Say>` +
+    `<Say voice="Polly.Joanna-Neural">${escapeXml('I will have a colleague follow up. Thank you for your time.')}</Say>` +
     `</Response>`
   );
 }

@@ -143,11 +143,19 @@ export class CallSession {
        fall back to OpenAI's own voice rather than leaving the caller silent. */
     if (useCartesia()) {
       try {
+        /* The script decides the pace. A phone line at 8 kHz is unforgiving,
+           so a sales call runs slower than a conversational one. */
+        const speed = this.params.speed
+          ? Number(this.params.speed)
+          : (callCfg.speed ?? null);
+
         this.tts = new CartesiaStream({
           language: this.language,
+          speed: Number.isFinite(speed) && speed ? speed : null,
           onAudio: (b64) => this.playAudio(b64),
           onError: () => this.failoverToOpenAIVoice(),
         });
+        if (speed) log.info('tts', `speed ${speed} for this call`);
         await this.tts.connect();
         this.stage = 'cartesia connected';
       } catch (err) {
@@ -441,6 +449,7 @@ export class CallSession {
       if (this.tts) {
         const next = new CartesiaStream({
           language: lang,
+          speed: this.tts?.speed ?? null,
           onAudio: (b64) => this.playAudio(b64),
           onError: () => this.failoverToOpenAIVoice(),
         });

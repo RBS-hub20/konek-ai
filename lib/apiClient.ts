@@ -1,7 +1,7 @@
 'use client';
 
 import type {
-  Lead, SalesSettings, Service,
+  Lead, OutboundScript, SalesSettings, Service,
   Business, BusinessBrain, CallLog, Campaign, Contact,
   KnowledgeFile, OverviewStats, SkillRecord,
 } from './types2';
@@ -69,6 +69,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ confirm: true }),
     }),
+  bridgeHealth: () => req<Record<string, unknown>>('/api/bridge/health'),
   dbHealth: () => req<Record<string, unknown>>('/api/db/health'),
 
   /* Outbound sales */
@@ -85,6 +86,15 @@ export const api = {
   salesSettings: () => req<{ sales: SalesSettings }>('/api/platform/sales'),
   saveSalesSettings: (patch: Partial<SalesSettings>) =>
     req<{ sales: SalesSettings }>('/api/platform/sales', { method: 'POST', body: JSON.stringify(patch) }),
+
+  /* Outbound scripts */
+  scripts: (industry?: string, country?: string) =>
+    req<{ scripts: OutboundScript[]; wouldUse?: OutboundScript | null }>(
+      `/api/scripts${industry || country ? `?industry=${industry ?? ''}&country=${country ?? ''}` : ''}`
+    ),
+  saveScript: (script: Partial<OutboundScript> & { setDefault?: boolean }) =>
+    req<{ script: OutboundScript }>('/api/scripts', { method: 'POST', body: JSON.stringify(script) }),
+  deleteScript: (id: string) => req<{ deleted: string }>(`/api/scripts?id=${id}`, { method: 'DELETE' }),
 
   /* Services */
   services: (businessId?: string) =>

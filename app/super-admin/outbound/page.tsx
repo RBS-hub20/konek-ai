@@ -9,6 +9,7 @@ import { Field, Input, Select } from '@/components/ui/Input';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import type { PhoneValue } from '@/components/ui/phoneTypes';
 import { UnlockDialog } from '@/components/admin/UnlockDialog';
+import { ScriptStudio } from '@/components/super-admin/ScriptStudio';
 import { api, tryApi } from '@/lib/apiClient';
 import { needsUnlock } from '@/lib/store';
 import type { Lead, SalesSettings } from '@/lib/types2';
@@ -43,6 +44,7 @@ export default function OutboundPage() {
   const [calling, setCalling] = useState<string | null>(null);
   const [showUnlock, setShowUnlock] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
 
   const [form, setForm] = useState({ company: '', contact_person: '', industry: 'Laundry' });
   /* Same component the test-call dialog uses, so the number is already E.164
@@ -137,6 +139,10 @@ export default function OutboundPage() {
 
       {notice && <div className="rounded-brand border border-line bg-surface p-4 text-[13px] text-muted">{notice}</div>}
 
+      <Funnel leads={leads} active={filter} onPick={setFilter} />
+
+      <ScriptStudio />
+
       {/* Add lead */}
       <section className="rounded-brand border border-line bg-paper p-5">
         <h2 className="font-display text-[14px] font-semibold text-ink">Add a lead</h2>
@@ -169,7 +175,14 @@ export default function OutboundPage() {
       <section className="overflow-hidden rounded-brand border border-line bg-paper">
         <div className="border-b border-line px-5 py-4">
           <h2 className="font-display text-[14px] font-semibold text-ink">Pipeline</h2>
-          <p className="mt-0.5 text-[12px] text-muted">{leads.length} lead{leads.length === 1 ? '' : 's'}</p>
+          <p className="mt-0.5 text-[12px] text-muted">
+            {filter ? `${leads.filter((l) => l.status === filter).length} ${filter}` : `${leads.length} lead${leads.length === 1 ? '' : 's'}`}
+            {filter && (
+              <button type="button" onClick={() => setFilter(null)} className="ml-2 text-accent hover:underline">
+                show all
+              </button>
+            )}
+          </p>
         </div>
 
         {loading ? (
@@ -191,7 +204,7 @@ export default function OutboundPage() {
                 </tr>
               </thead>
               <tbody>
-                {leads.map((l) => (
+                {leads.filter((l) => !filter || l.status === filter).map((l) => (
                   <tr key={l.id} className="border-b border-line last:border-0 hover:bg-surface">
                     <td className="px-5 py-4 text-[13px] font-medium text-ink">{l.company ?? '—'}</td>
                     <td className="px-5 py-4 text-[13px] text-muted">{l.contact_person ?? '—'}</td>
@@ -229,5 +242,55 @@ export default function OutboundPage() {
         onUnlocked={() => { if (pending) void call(pending); setPending(null); }}
       />
     </div>
+  );
+}
+
+/* ── Funnel ──────────────────────────────────────────────────────── */
+
+/* The stages a lead moves through, in order, so the drop-off is visible at a
+   glance rather than inferred from a table. */
+const STAGES: { key: string; label: string; className: string }[] = [
+  { key: 'New', label: 'New', className: 'bg-line text-muted' },
+  { key: 'Calling', label: 'Calling', className: 'bg-amber-500/15 text-amber-500' },
+  { key: 'Interested', label: 'Interested', className: 'bg-accent/15 text-accent' },
+  { key: 'Transferred', label: 'Transferred', className: 'bg-emerald-500/15 text-emerald-500' },
+  { key: 'Closed', label: 'Closed', className: 'bg-amber-400/20 text-amber-400' },
+  { key: 'Not interested', label: 'Not interested', className: 'bg-line text-muted' },
+  { key: 'No answer', label: 'No answer', className: 'bg-line text-muted' },
+];
+
+function Funnel({ leads, active, onPick }: {
+  leads: Lead[]; active: string | null; onPick: (s: string | null) => void;
+}) {
+  const total = leads.length || 1;
+  return (
+    <section className="rounded-brand border border-line bg-paper p-5">
+      <h2 className="font-display text-[14px] font-semibold text-ink">Pipeline</h2>
+      <p className="mt-0.5 text-[12px] text-muted">Click a stage to filter the table below.</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {STAGES.map((s) => {
+          const n = leads.filter((l) => l.status === s.key).length;
+          return (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => onPick(active === s.key ? null : s.key)}
+              className={cn(
+                'flex min-w-[120px] flex-1 flex-col items-start gap-1 rounded-brand border px-3 py-2.5 text-left transition-colors focus-ring',
+                active === s.key ? 'border-ink' : 'border-line hover:bg-surface'
+              )}
+            >
+              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide', s.className)}>
+                {s.label}
+              </span>
+              <span className="font-display text-[18px] font-semibold tabular-nums text-ink">{n}</span>
+              <span className="h-1 w-full rounded-full bg-line">
+                <span className="block h-1 rounded-full bg-accent" style={{ width: `${(n / total) * 100}%` }} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

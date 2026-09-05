@@ -2,9 +2,10 @@ import { db, hasSupabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
 import type {
   Business, BusinessBrain, CallLog, Campaign, Contact,
-  Integration, KnowledgeFile, Lead, OverviewStats, SalesSettings, Service,
-  SkillRecord, VibeKey,
+  Integration, KnowledgeFile, Lead, OutboundScript, OverviewStats, SalesSettings,
+  Service, SkillRecord, VibeKey,
 } from '@/lib/types2';
+import { DEFAULT_VOICE_SETTINGS } from '@/lib/types2';
 import { vibeToKey } from '@/lib/types2';
 import { SEED_SKILLS } from './seed';
 
@@ -27,6 +28,7 @@ const nowIso = () => new Date().toISOString();
 interface Mem {
   services: Service[];
   leads: Lead[];
+  scripts: OutboundScript[];
   platform: Record<string, Record<string, unknown>>;
   businesses: Business[];
   brains: BusinessBrain[];
@@ -72,7 +74,7 @@ function mem(): Mem {
         price_range: '₱2,500 – ₱12,800', goal: 'Book',
         knowledge_files: [], website_link: null, updated_at: nowIso(),
       }],
-      campaigns: [], contacts: [], callLogs: [], services: [], leads: [],
+      campaigns: [], contacts: [], callLogs: [], services: [], leads: [], scripts: [],
       platform: { sales: { manager_number: null, backup_number: null, whisper: true } },
       skills: SEED_SKILLS.map((s) => ({
         id: s.id, name: s.name, description: s.description,
@@ -1132,4 +1134,122 @@ export async function saveSalesSettings(patch: Partial<SalesSettings>): Promise<
   if (missingTable) throw new Error('The platform_settings table does not exist. Run supabase.sql.');
   if (error) throw error;
   return merged;
+}
+
+/* ── Outbound scripts ────────────────────────────────────────────── */
+
+const normalizeScript = (r: Record<string, unknown>): OutboundScript => ({
+  id: String(r.id),
+  name: String(r.name ?? 'Untitled script'),
+  industry: (r.industry as string) ?? 'generic',
+  vibe: (r.vibe as string) ?? 'professional',
+  country: (r.country as string) ?? 'ALL',
+  script_steps: Array.isArray(r.script_steps) ? (r.script_steps as OutboundScript['script_steps']) : [],
+  voice_settings: { ...DEFAULT_VOICE_SETTINGS, ...((r.voice_settings as object) ?? {}) },
+  is_active: r.is_active !== false,
+  is_default: r.is_default === true,
+  created_at: (r.created_at as string) ?? nowIso(),
+});
+
+export async function listScripts(): Promise<OutboundScript[]> {
+  if (!hasSupabase) return mem().scripts;
+  const { data, error } = await db().from('outbound_scripts').select('*').order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(normalizeScript);
+}
+
+export async function getScript(id: string): Promise<OutboundScript | null> {
+  if (!hasSupabase) return mem().scripts.find((s) => s.id === id) ?? null;
+  const { data, error } = await db().from('outbound_scripts').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data ? normalizeScript(data) : null;
+}
+
+export async function saveScript(input: Partial<OutboundScript>): Promise<OutboundScript> {
+  const row: Record<string, unknown> = {
+    name: input.name ?? 'Untitled script',
+    industry: input.industry ?? 'generic',
+    vibe: input.vibe ?? 'professional',
+    country: input.country ?? 'ALL',
+    script_steps: input.script_steps ?? [],
+    voice_settings: { ...DEFAULT_VOICE_SETTINGS, ...(input.voice_settings ?? {}) },
+    is_active: input.is_active ?? true,
+    is_default: input.is_default ?? false,
+  };
+
+  if (!hasSupabase) {
+    const m = mem();
+    if (input.id) {
+      const i = m.scripts.findIndex((s) => s.id === input.id);
+      if (i >= 0) {
+        m.scripts[i] = { ...m.scripts[i], ...(row as Partial<OutboundScript>), id: input.id };
+        return m.scripts[i];
+      }
+    }
+    const created = normalizeScript({ ...row, id: uuid(), created_at: nowIso() });
+    m.scripts.push(created);
+    return created;
+  }
+
+  if (input.id) {
+    const { data, error } = await updateResilient<Record<string, unknown>>(db(), 'outbound_scripts', { id: input.id }, row);
+    if (error) throw error;
+    if (data) return normalizeScript(data);
+  }
+  const { data, missingTable, error } = await insertResilient<Record<string, unknown>>(db(), 'outbound_scripts', row);
+  if (missingTable) throw new Error('The outbound_scripts table does not exist. Run supabase.sql.');
+  if (!data) throw error ?? new Error('Could not save the script');
+  return normalizeScript(data);
+}
+
+export async function deleteScript(id: string): Promise<void> {
+  if (!hasSupabase) {
+    const m = mem();
+    m.scripts = m.scripts.filter((s) => s.id !== id);
+    return;
+  }
+  const { error } = await db().from('outbound_scripts').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** Only one default per industry and country, so clear the others first. */
+export async function setDefaultScript(id: string): Promise<OutboundScript | null> {
+  const script = await getScript(id);
+  if (!script) return null;
+  const all = await listScripts();
+  for (const other of all) {
+    if (other.id === id) continue;
+    if (other.industry === script.industry && other.country === script.country && other.is_default) {
+      await safe(() => saveScript({ ...other, is_default: false }), null as unknown as OutboundScript);
+    }
+  }
+  return saveScript({ ...script, is_default: true });
+}
+
+/**
+ * The script a call should use: an active default for this industry and
+ * country, then the same industry anywhere, then a generic one. Falling back
+ * rather than failing means a lead in a new industry still gets called.
+ */
+export async function pickScript(industry?: string | null, country?: string | null): Promise<OutboundScript | null> {
+  const all = (await safe(() => listScripts(), [])).filter((s) => s.is_active);
+  if (!all.length) return null;
+  const ind = (industry ?? 'generic').toLowerCase();
+  const ctry = (country ?? 'ALL').toUpperCase();
+
+  const rank = (s: OutboundScript) => {
+    let score = 0;
+    if (s.industry === ind) score += 4;
+    else if (s.industry === 'generic') score += 1;
+    else return -1;                       // wrong industry entirely
+    if (s.country === ctry) score += 3;
+    else if (s.country === 'ALL') score += 1;
+    else return -1;                       // wrong country entirely
+    if (s.is_default) score += 2;
+    return score;
+  };
+
+  const ranked = all.map((s) => ({ s, score: rank(s) })).filter((r) => r.score >= 0)
+    .sort((a, b) => b.score - a.score);
+  return ranked[0]?.s ?? null;
 }

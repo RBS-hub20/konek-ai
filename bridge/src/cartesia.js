@@ -140,6 +140,11 @@ export function shapeForSpeech(text, language = 'EN') {
     t = t.replace(/^((?:hi|hello|hey|magandang (?:umaga|hapon|gabi|araw))\s+(?:po|ho))\s+(?=[A-Z])/i, '$1, ');
   }
 
+  /* Sonic takes no SSML, so a requested pause is expressed the only way it
+     understands: sentence punctuation. An ellipsis reads as a longer beat
+     than a full stop, which is what a step break needs. */
+  t = t.replace(/\s*\[\[pause\]\]\s*/g, '… ');
+
   /* Ranges are read as a subtraction otherwise: "2500-12800" -> "2500 to 12800". */
   t = t.replace(/(\d)\s*[-–]\s*(\d)/g, '$1 to $2');
 

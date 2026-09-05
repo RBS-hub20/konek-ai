@@ -177,6 +177,25 @@ alter table services add column if not exists sort_order  int default 0;
 
 create index if not exists services_business_idx on services (business_id, sort_order);
 
+-- ── 5c · Outbound call scripts ──────────────────────────────────────
+-- What Cindy actually says. A scripted opener read at a steady pace is far
+-- easier to follow on a phone line than an improvised one.
+create table if not exists outbound_scripts (
+  id uuid primary key default gen_random_uuid(),
+  name text,
+  created_at timestamptz default now()
+);
+alter table outbound_scripts add column if not exists industry       text default 'generic';
+alter table outbound_scripts add column if not exists vibe           text default 'professional';
+alter table outbound_scripts add column if not exists country        text default 'ALL';
+alter table outbound_scripts add column if not exists script_steps   jsonb default '[]'::jsonb;
+alter table outbound_scripts add column if not exists voice_settings jsonb default '{"speed":0.92,"emotion":"professional","pause_ms":400}'::jsonb;
+alter table outbound_scripts add column if not exists is_active      boolean default true;
+alter table outbound_scripts add column if not exists is_default     boolean default false;
+
+create index if not exists outbound_scripts_pick_idx
+  on outbound_scripts (industry, country, is_default);
+
 -- ── 6 · Call logs ───────────────────────────────────────────────────
 create table if not exists call_logs (
   id uuid primary key default gen_random_uuid(),
@@ -205,6 +224,7 @@ alter table call_logs add column if not exists skills_used      text[] default '
 alter table call_logs add column if not exists twilio_sid       text;
 alter table call_logs add column if not exists transferred_to   text;
 alter table call_logs add column if not exists transfer_status  text;   -- requested | connected | no_answer | failed
+alter table call_logs add column if not exists script_id        uuid;   -- which script Cindy read
 
 create unique index if not exists call_logs_twilio_sid_key on call_logs (twilio_sid) where twilio_sid is not null;
 
@@ -336,13 +356,93 @@ begin
   foreach t in array array[
     'businesses','business_brain','brain_chunks','campaigns','contacts','leads',
     'call_logs','skills','business_skills','business_integrations','services',
-    'platform_settings'
+    'platform_settings','outbound_scripts'
   ] loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists "Allow all" on %I', t);
     execute format('create policy "Allow all" on %I for all using (true) with check (true)', t);
   end loop;
 end $$;
+
+-- ── 13b · Default outbound scripts ──────────────────────────────────
+-- Short sentences, one idea each, and a full stop where a person would
+-- breathe. That is most of what makes a call understandable at 8 kHz.
+insert into outbound_scripts (name, industry, vibe, country, is_default, is_active, voice_settings, script_steps)
+select * from (values
+(
+  'Professional Laundry PH', 'laundry', 'professional', 'PH', true, true,
+  '{"speed":0.92,"emotion":"professional","pause_ms":400}'::jsonb,
+  '[
+    {"step":"opener","pause_ms":500,
+     "text_ph":"Good morning po. Si {{contact}} po ba, from {{company}}? This is Cindy, from Konek A I. Alam ko po busy kayo. May thirty seconds lang po ba kayo? Gusto ko lang pong i-share kung paano namin natutulungan ang mga laundry business na sagutin ang calls, twenty four seven.",
+     "text_ae":"Good morning. Is this {{contact}}, from {{company}}? This is Cindy, from Konek A I. I know you are busy. Do you have thirty seconds? I would like to share how we help laundry businesses answer calls, twenty four seven."},
+    {"step":"discovery","pause_ms":400,
+     "text_ph":"Madalas po sinasabi sa amin ng mga laundry owner, na nami-miss nila ang pickup requests. Lalo na po kapag abala ang staff sa paglalaba. O kaya after hours. Nangyayari po ba yan sa {{company}}?",
+     "text_ae":"Laundry owners often tell us they miss pickup requests. Especially when staff are busy, or after hours. Does that happen at {{company}}?"},
+    {"step":"pitch","pause_ms":400,
+     "text_ph":"Ang Konek A I po ay isang A I receptionist. Sinasagot po nito ang tawag ninyo, twenty four seven. Sa Tagalog, o sa English. Kaya po nitong tumanggap ng pickup booking. Kaya po nitong sagutin ang magkano per kilo. At naka-log po lahat, may transcript. Kahit alas diyes ng gabi, may sumasagot. Forty nine dollars po per month. May three day free trial. Kami na po ang bahala sa setup.",
+     "text_ae":"Konek A I is an A I receptionist. It answers your calls, twenty four seven, in English or Tagalog. It takes pickup bookings. It answers how much per kilo. And it logs every call, with a transcript. Even at ten at night, someone answers. It is forty nine dollars a month, with a three day free trial. We do the setup for you."},
+    {"step":"close","pause_ms":300,
+     "text_ph":"Sige po. Ikokonekta ko na po kayo sa manager namin. Kaya po niyang i-setup ang free trial ninyo, in five minutes. Walang commitment po. Sandali lang po.",
+     "text_ae":"Perfect. Let me connect you to our manager now. He can set up your free trial in five minutes. No commitment. One moment please."}
+  ]'::jsonb
+),
+(
+  'Professional Restaurant PH', 'restaurant', 'professional', 'PH', true, true,
+  '{"speed":0.92,"emotion":"professional","pause_ms":400}'::jsonb,
+  '[
+    {"step":"opener","pause_ms":500,
+     "text_ph":"Good morning po. Si {{contact}} po ba, from {{company}}? Si Cindy po ito, from Konek A I. Thirty seconds lang po. Tungkol po sa mga tawag na hindi nasasagot tuwing rush hour.",
+     "text_ae":"Good morning. Is this {{contact}}, from {{company}}? This is Cindy, from Konek A I. Just thirty seconds. It is about the calls that go unanswered during rush hour."},
+    {"step":"discovery","pause_ms":400,
+     "text_ph":"Tuwing lunch at dinner rush po, madalas walang makasagot ng telepono. Nawawala po ang reservations at delivery orders. Ganun din po ba sa {{company}}?",
+     "text_ae":"During lunch and dinner rush, nobody can pick up the phone. Reservations and delivery orders get lost. Is it the same at {{company}}?"},
+    {"step":"pitch","pause_ph":400,"pause_ms":400,
+     "text_ph":"Ang Konek A I po ay sumasagot ng bawat tawag. Kumukuha po ng reservation. Sinasabi po ang menu at presyo. At nagta-take ng delivery order. Hindi na po kayo mawawalan ng customer dahil busy ang linya. Forty nine dollars po per month, with three day free trial.",
+     "text_ae":"Konek A I answers every call. It takes reservations. It reads out the menu and prices. And it takes delivery orders. You stop losing customers to a busy line. Forty nine dollars a month, with a three day free trial."},
+    {"step":"close","pause_ms":300,
+     "text_ph":"Sige po. Ikokonekta ko na po kayo sa manager namin ngayon. Sandali lang po.",
+     "text_ae":"Perfect. Let me connect you to our manager now. One moment please."}
+  ]'::jsonb
+),
+(
+  'Professional Gulf English', 'generic', 'professional', 'AE', true, true,
+  '{"speed":0.95,"emotion":"professional","pause_ms":400}'::jsonb,
+  '[
+    {"step":"opener","pause_ms":500,
+     "text_ph":"Good morning. Is this {{contact}}, from {{company}}? This is Cindy, from Konek A I. Do you have thirty seconds?",
+     "text_ae":"Good morning. Is this {{contact}}, from {{company}}? This is Cindy, from Konek A I. I know you are busy. Do you have thirty seconds? It is about the calls your business misses after hours."},
+    {"step":"discovery","pause_ms":400,
+     "text_ph":"Most businesses tell us they miss calls after hours. Does that happen at {{company}}?",
+     "text_ae":"Most {{industry}} businesses in Dubai tell us the same thing. Calls come in after closing, and nobody answers. Does that happen at {{company}}?"},
+    {"step":"pitch","pause_ms":400,
+     "text_ph":"Konek A I answers your business calls, twenty four seven, in English or Arabic. It books appointments, answers pricing questions, and logs every call with a transcript. Forty nine dollars a month, with a three day free trial.",
+     "text_ae":"Konek A I is an A I receptionist. It answers your calls, twenty four seven, in English or Arabic. It books appointments. It answers pricing questions. And it logs every call with a full transcript. Forty nine dollars a month, with a three day free trial. We handle the setup."},
+    {"step":"close","pause_ms":300,
+     "text_ph":"Let me connect you to our manager. One moment please.",
+     "text_ae":"Excellent. Let me connect you to our manager now. He can set up your free trial in five minutes, with no commitment. One moment please."}
+  ]'::jsonb
+),
+(
+  'Professional Generic PH', 'generic', 'professional', 'PH', true, true,
+  '{"speed":0.92,"emotion":"professional","pause_ms":400}'::jsonb,
+  '[
+    {"step":"opener","pause_ms":500,
+     "text_ph":"Good morning po. Si {{contact}} po ba, from {{company}}? Si Cindy po ito, from Konek A I. May thirty seconds lang po ba kayo?",
+     "text_ae":"Good morning. Is this {{contact}}, from {{company}}? This is Cindy, from Konek A I. Do you have thirty seconds?"},
+    {"step":"discovery","pause_ms":400,
+     "text_ph":"Madalas po kasi, may mga tawag na hindi nasasagot. Lalo na po after hours. Nangyayari po ba yan sa {{company}}?",
+     "text_ae":"Businesses often miss calls, especially after hours. Does that happen at {{company}}?"},
+    {"step":"pitch","pause_ms":400,
+     "text_ph":"Ang Konek A I po ay sumasagot ng tawag ninyo, twenty four seven. Sa Tagalog o English. Nagbo-book po ng appointment, sumasagot ng presyo, at may transcript po lahat. Forty nine dollars po per month, may three day free trial.",
+     "text_ae":"Konek A I answers your calls twenty four seven, in English or Tagalog. It books appointments, answers pricing questions, and keeps a transcript of every call. Forty nine dollars a month, with a three day free trial."},
+    {"step":"close","pause_ms":300,
+     "text_ph":"Sige po. Ikokonekta ko na po kayo sa manager namin. Sandali lang po.",
+     "text_ae":"Perfect. Let me connect you to our manager now. One moment please."}
+  ]'::jsonb
+)
+) as v(name, industry, vibe, country, is_default, is_active, voice_settings, script_steps)
+where not exists (select 1 from outbound_scripts);
 
 -- ── 14b · Duplicate tenants (informational) ─────────────────────────
 -- Before this file existed, an empty businesses table could be seeded more
