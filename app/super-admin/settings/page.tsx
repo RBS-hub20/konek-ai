@@ -2,6 +2,9 @@
 
 import { AlertTriangle, Check, PhoneForwarded, RefreshCw } from 'lucide-react';
 import { Field, Input } from '@/components/ui/Input';
+import { PhoneInput } from '@/components/ui/PhoneInput';
+import type { PhoneValue } from '@/components/ui/phoneTypes';
+import type { CountryCode } from 'libphonenumber-js';
 import { Switch } from '@/components/ui/Switch';
 import { tryApi } from '@/lib/apiClient';
 import type { SalesSettings } from '@/lib/types2';
@@ -20,8 +23,10 @@ export default function SchemaHealthPage() {
   /* Where an interested lead is transferred. Platform-wide: these calls are
      KONEK selling itself, not a tenant calling its own customers. */
   const [sales, setSales] = useState<SalesSettings>({ manager_number: null, backup_number: null, whisper: true });
-  const [manager, setManager] = useState('');
-  const [backup, setBackup] = useState('');
+  /* Country-aware, so a Dubai number and a Manila number are both entered the
+     way their owner would say them and stored as E.164. */
+  const [manager, setManager] = useState<PhoneValue>({ e164: null, country: 'AE', valid: false });
+  const [backup, setBackup] = useState<PhoneValue>({ e164: null, country: 'PH', valid: false });
   const [savingSales, setSavingSales] = useState(false);
 
   useEffect(() => {
@@ -29,8 +34,12 @@ export default function SchemaHealthPage() {
       const res = await tryApi(() => api.salesSettings());
       if (res) {
         setSales(res.sales);
-        setManager(res.sales.manager_number ?? '');
-        setBackup(res.sales.backup_number ?? '');
+        if (res.sales.manager_number) {
+          setManager({ e164: res.sales.manager_number, country: countryOf(res.sales.manager_number, 'AE' as CountryCode), valid: true });
+        }
+        if (res.sales.backup_number) {
+          setBackup({ e164: res.sales.backup_number, country: countryOf(res.sales.backup_number, 'PH' as CountryCode), valid: true });
+        }
       }
     })();
   }, []);
@@ -40,7 +49,9 @@ export default function SchemaHealthPage() {
     try {
       const res = await api.saveSalesSettings(patch);
       setSales(res.sales);
-      setNotice('Sales numbers saved.');
+      setNotice(
+        `Saved. ${res.sales.manager_number ?? 'no manager'}${res.sales.backup_number ? ` and ${res.sales.backup_number}` : ''} will ring together.`
+      );
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not save');
     } finally {
@@ -205,25 +216,20 @@ export default function SchemaHealthPage() {
         </p>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label="Sales manager" hint="Your number. Rings first.">
-            <Input
-              value={manager}
-              onChange={(e) => setManager(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void saveSales({ manager_number: manager })}
-              placeholder="+971501184402"
-              inputMode="tel"
-            />
+          <Field label="Sales manager" hint={manager.e164 && !manager.valid ? 'Not valid for this country yet.' : 'Pick the country, then type the number.'}>
+            <PhoneInput value={manager} onChange={setManager} onEnter={() => void saveSales({ manager_number: manager.e164 })} />
           </Field>
-          <Field label="Backup" hint="Optional. Rings at the same time.">
-            <Input
-              value={backup}
-              onChange={(e) => setBackup(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void saveSales({ backup_number: backup })}
-              placeholder="+639214878257"
-              inputMode="tel"
-            />
+          <Field label="Backup" hint={backup.e164 && !backup.valid ? 'Not valid for this country yet.' : 'Optional. Rings at the same time.'}>
+            <PhoneInput value={backup} onChange={setBackup} onEnter={() => void saveSales({ backup_number: backup.e164 })} />
           </Field>
         </div>
+
+        {(manager.e164 || backup.e164) && (
+          <p className="mt-3 text-[12px] leading-relaxed text-muted">
+            Both numbers ring at once, wherever they are — a Dubai manager and a Manila backup ring
+            together on a Philippine lead. Whoever answers first gets the call.
+          </p>
+        )}
 
         <div className="mt-5 flex items-start justify-between gap-4 border-t border-line pt-5">
           <div>
@@ -243,8 +249,13 @@ export default function SchemaHealthPage() {
         <div className="mt-5 flex items-center gap-2">
           <Button
             size="sm"
-            disabled={savingSales || (manager === (sales.manager_number ?? '') && backup === (sales.backup_number ?? ''))}
-            onClick={() => void saveSales({ manager_number: manager, backup_number: backup })}
+            disabled={
+              savingSales ||
+              (manager.e164 === (sales.manager_number ?? null) && backup.e164 === (sales.backup_number ?? null)) ||
+              Boolean(manager.e164 && !manager.valid) ||
+              Boolean(backup.e164 && !backup.valid)
+            }
+            onClick={() => void saveSales({ manager_number: manager.e164, backup_number: backup.e164 })}
           >
             {savingSales ? 'Saving…' : 'Save numbers'}
           </Button>
@@ -267,4 +278,14 @@ export default function SchemaHealthPage() {
       </section>
     </div>
   );
+}
+
+/** Best-effort country for a stored E.164 number, so the picker opens right. */
+function countryOf(phone: string, fallback: CountryCode): CountryCode {
+  const map: [string, CountryCode][] = [
+    ['+971', 'AE'], ['+966', 'SA'], ['+974', 'QA'], ['+63', 'PH'],
+    ['+65', 'SG'], ['+91', 'IN'], ['+44', 'GB'], ['+61', 'AU'], ['+1', 'US'],
+  ];
+  for (const [prefix, code] of map) if (phone.startsWith(prefix)) return code;
+  return fallback;
 }

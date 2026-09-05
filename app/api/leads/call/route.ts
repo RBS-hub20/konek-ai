@@ -61,7 +61,13 @@ export async function POST(req: Request) {
         const t = err as { message?: string; code?: number | string };
         await safe(() => updateLead(lead.id, { status: 'No answer' }), null);
         return Response.json(
-          { success: false, error: 'Twilio rejected the call', twilioError: t.message, twilioCode: t.code ?? null },
+          {
+            success: false,
+            error: 'Twilio rejected the call',
+            twilioError: t.message,
+            twilioCode: t.code ?? null,
+            hint: twilioHint(t.code, lead.country),
+          },
           { status: 502 }
         );
       }
@@ -91,6 +97,27 @@ export async function POST(req: Request) {
     );
   } catch (err) {
     return fail('Could not call the lead', 500, describeError(err).detail);
+  }
+}
+
+/** The Twilio failures that actually happen when dialling internationally. */
+function twilioHint(code: number | string | undefined | null, country: string | null): string | undefined {
+  const where = country ? `${country} ` : '';
+  switch (String(code)) {
+    case '21215':
+    case '21216':
+      return `Calls to ${where}are blocked. Enable the country in Twilio Console → Voice → Geographic Permissions, then try again.`;
+    case '21211':
+      return 'The number is not valid E.164. Re-add the lead with its country selected.';
+    case '21606':
+      return 'The outbound number is not a voice-enabled Twilio number on this account.';
+    case '20003':
+      return 'Twilio authentication failed — check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.';
+    case '21219':
+    case '21608':
+      return 'Trial account: verify this number in Twilio Console → Verified Caller IDs, or upgrade.';
+    default:
+      return undefined;
   }
 }
 

@@ -121,6 +121,38 @@ export async function updateResilient<T = Record<string, unknown>>(
   return { data: null, dropped, missingTable: false, error: { message: 'Too many unknown columns' } };
 }
 
+/**
+ * Upsert that drops unknown columns and retries, for tables whose shape may
+ * predate the code writing to them.
+ */
+export async function upsertResilient<T = Record<string, unknown>>(
+  db: SupabaseClient,
+  table: string,
+  row: Record<string, unknown>,
+  onConflict: string
+): Promise<WriteResult<T>> {
+  const payload = { ...row };
+  const dropped: string[] = [];
+
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    const { data, error } = await db.from(table).upsert(payload, { onConflict }).select('*').maybeSingle();
+    if (!error) return { data: (data as T) ?? null, dropped, missingTable: false, error: null };
+
+    const err = error as PgError;
+    if (isMissingTable(err)) return { data: null, dropped, missingTable: true, error: err };
+
+    const col = missingColumn(err);
+    /* Never drop the conflict key — without it the upsert is meaningless. */
+    if (col && col in payload && col !== onConflict) {
+      delete payload[col];
+      dropped.push(col);
+      continue;
+    }
+    return { data: null, dropped, missingTable: false, error: err };
+  }
+  return { data: null, dropped, missingTable: false, error: { message: 'Too many unknown columns' } };
+}
+
 /** Advice to attach to a schema-shaped failure. */
 export const SCHEMA_HINT =
   'Run supabase.sql in the Supabase SQL Editor. It is idempotent and ends with NOTIFY pgrst so the schema cache reloads.';

@@ -15,6 +15,8 @@ import { SEED_SKILLS } from './seed';
    on serverless it is per-instance — never rely on it in production.
    ═══════════════════════════════════════════════════════════════════ */
 
+const log = (msg: string) => console.warn(`[KONEK AI] ${msg}`);
+
 const uuid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -672,8 +674,9 @@ export async function createService(businessId: string, input: Partial<Service>)
     mem().services.push(created);
     return created;
   }
-  const { data, error } = await db().from('services').insert(row).select().single();
-  if (error) throw error;
+  const { data, missingTable, error } = await insertResilient<Record<string, unknown>>(db(), 'services', row);
+  if (missingTable) throw new Error('The services table does not exist. Run supabase.sql.');
+  if (!data) throw error ?? new Error('Could not insert the service');
   return normalizeService(data);
 }
 
@@ -763,7 +766,7 @@ export type { VibeKey };
 
 /* ── Resilient helpers used by the call path ─────────────────────── */
 
-import { insertResilient, isMissingTable, type PgError } from './resilient';
+import { insertResilient, updateResilient, upsertResilient, isMissingTable, type PgError } from './resilient';
 
 /** Runs a loader but never lets it break the call. */
 export async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -1059,8 +1062,12 @@ export async function createLead(input: Partial<Lead>): Promise<Lead> {
     mem().leads.unshift(created);
     return created;
   }
-  const { data, error } = await db().from('leads').insert(row).select().single();
-  if (error) throw error;
+  /* This table may predate the code writing to it, so unknown columns are
+     dropped rather than failing the insert. */
+  const { data, dropped, missingTable, error } = await insertResilient<Record<string, unknown>>(db(), 'leads', row);
+  if (missingTable) throw new Error('The leads table does not exist. Run supabase.sql.');
+  if (!data) throw error ?? new Error('Could not insert the lead');
+  if (dropped.length) log(`leads: wrote without ${dropped.join(', ')}`);
   return normalizeLead(data);
 }
 
@@ -1077,7 +1084,7 @@ export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead
     m.leads[i] = { ...m.leads[i], ...(clean as Partial<Lead>) };
     return m.leads[i];
   }
-  const { data, error } = await db().from('leads').update(clean).eq('id', id).select().maybeSingle();
+  const { data, error } = await updateResilient<Record<string, unknown>>(db(), 'leads', { id }, clean);
   if (error) throw error;
   return data ? normalizeLead(data) : null;
 }
@@ -1116,8 +1123,13 @@ export async function saveSalesSettings(patch: Partial<SalesSettings>): Promise<
     mem().platform.sales = merged as unknown as Record<string, unknown>;
     return merged;
   }
-  const { error } = await db().from('platform_settings')
-    .upsert({ key: 'sales', value: merged, updated_at: nowIso() }, { onConflict: 'key' });
+  const { missingTable, error } = await upsertResilient(
+    db(),
+    'platform_settings',
+    { key: 'sales', value: merged, updated_at: nowIso() },
+    'key'
+  );
+  if (missingTable) throw new Error('The platform_settings table does not exist. Run supabase.sql.');
   if (error) throw error;
   return merged;
 }

@@ -20,6 +20,12 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     const err = new Error((body as ApiErr).detail || (body as ApiErr).error || `${res.status} ${res.statusText}`);
     (err as ApiError).status = res.status;
     (err as ApiError).needsUnlock = Boolean((body as ApiErr).needsUnlock);
+    /* Twilio's own guidance is more useful than the generic message. */
+    const hint = (body as { hint?: string; twilioError?: string }).hint;
+    const twilioError = (body as { twilioError?: string }).twilioError;
+    if (twilioError || hint) {
+      (err as ApiError).message = [twilioError, hint].filter(Boolean).join(' — ');
+    }
     throw err;
   }
   return body as T;

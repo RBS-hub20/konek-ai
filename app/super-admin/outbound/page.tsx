@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/ui/StatCard';
 import { Field, Input, Select } from '@/components/ui/Input';
+import { PhoneInput } from '@/components/ui/PhoneInput';
+import type { PhoneValue } from '@/components/ui/phoneTypes';
 import { UnlockDialog } from '@/components/admin/UnlockDialog';
 import { api, tryApi } from '@/lib/apiClient';
 import { needsUnlock } from '@/lib/store';
@@ -42,9 +44,10 @@ export default function OutboundPage() {
   const [showUnlock, setShowUnlock] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
 
-  const [form, setForm] = useState({
-    company: '', contact_person: '', phone: '', industry: 'Laundry', country: 'PH',
-  });
+  const [form, setForm] = useState({ company: '', contact_person: '', industry: 'Laundry' });
+  /* Same component the test-call dialog uses, so the number is already E.164
+     before it leaves the browser. */
+  const [phone, setPhone] = useState<PhoneValue>({ e164: null, country: 'PH', valid: false });
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
@@ -55,17 +58,24 @@ export default function OutboundPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const dial = COUNTRIES.find((c) => c.code === form.country)?.dial ?? '';
-
   const addLead = async () => {
-    if (!form.company.trim() || !form.phone.trim()) return;
+    if (!form.company.trim() || !phone.valid || !phone.e164) return;
     setAdding(true); setNotice(null);
     try {
-      const phone = form.phone.trim().startsWith('+') ? form.phone.trim() : `${dial}${form.phone.replace(/^0+/, '').trim()}`;
-      await api.addLead({ ...form, phone });
-      setForm({ company: '', contact_person: '', phone: '', industry: form.industry, country: form.country });
+      const res = await api.addLead({
+        company: form.company.trim(),
+        contact_person: form.contact_person.trim() || null,
+        industry: form.industry,
+        phone: phone.e164,
+        country: phone.country,
+      });
+      setForm({ company: '', contact_person: '', industry: form.industry });
+      setPhone({ e164: null, country: phone.country, valid: false });
+      setNotice(`Added ${res.leads[0]?.company ?? 'lead'} — ${res.leads[0]?.phone}.`);
       await load();
     } catch (err) {
+      /* Say what actually went wrong — a silent no-op is what made this look
+         like the button did nothing. */
       setNotice(err instanceof Error ? err.message : 'Could not add the lead');
     } finally {
       setAdding(false);
@@ -130,16 +140,14 @@ export default function OutboundPage() {
       {/* Add lead */}
       <section className="rounded-brand border border-line bg-paper p-5">
         <h2 className="font-display text-[14px] font-semibold text-ink">Add a lead</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-5">
+        <div className="mt-4 grid gap-4 md:grid-cols-4">
           <Field label="Company"><Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Bubbles Laundry" /></Field>
           <Field label="Contact person"><Input value={form.contact_person} onChange={(e) => setForm({ ...form, contact_person: e.target.value })} placeholder="Maria" /></Field>
-          <Field label="Country">
-            <Select value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })}>
-              {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-            </Select>
-          </Field>
-          <Field label="Phone" hint={`Starts ${dial}`}>
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && addLead()} placeholder="9214878257" inputMode="tel" />
+          <Field
+            label="Phone"
+            hint={phone.e164 && !phone.valid ? 'Not valid for this country yet.' : 'Pick the country, then type it as they would locally.'}
+          >
+            <PhoneInput value={phone} onChange={setPhone} onEnter={addLead} />
           </Field>
           <Field label="Industry">
             <Select value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })}>
@@ -147,7 +155,12 @@ export default function OutboundPage() {
             </Select>
           </Field>
         </div>
-        <Button size="sm" className="mt-4 gap-1.5" onClick={addLead} disabled={adding || !form.company.trim() || !form.phone.trim()}>
+        {phone.valid && phone.e164 && (
+          <p className="mt-3 text-[12px] text-muted">
+            Cindy will dial <span className="tabular-nums text-ink">{phone.e164}</span>
+          </p>
+        )}
+        <Button size="sm" className="mt-4 gap-1.5" onClick={addLead} disabled={adding || !form.company.trim() || !phone.valid}>
           <Plus className="h-3.5 w-3.5" /> {adding ? 'Adding…' : 'Add lead'}
         </Button>
       </section>
