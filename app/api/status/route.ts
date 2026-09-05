@@ -55,6 +55,9 @@ export async function GET() {
     }
 
     return ok({
+      /* Vercel sets this per deploy. It is the quickest way to tell whether a
+         push is actually serving yet. */
+      commit: (process.env.VERCEL_GIT_COMMIT_SHA ?? '').slice(0, 7) || 'unknown',
       mode: hasSupabase ? 'live' : 'mock',
       supabase: hasSupabase ? 'connected' : 'missing',
       twilio: flag(hasTwilio),
