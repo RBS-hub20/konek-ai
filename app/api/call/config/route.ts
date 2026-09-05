@@ -51,6 +51,8 @@ export async function GET(req: Request) {
       opener: buildOpener(business, brain, vibe, customerName, language),
       skillsUsed: skills.map((s) => s.id),
       goal: brain?.goal ?? 'Book',
+      /* When on, the bridge mirrors whatever language the caller uses. */
+      autoLanguage: business.auto_language !== false,
     };
   });
 }

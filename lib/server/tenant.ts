@@ -45,6 +45,7 @@ function mem(): Mem {
         plan: 'pro', calls_used: 0, calls_limit: 2000, status: 'active', mrr: 149,
         active_vibe: 'PRO_CLOSER',
         language: 'EN',
+        auto_language: true,
         settings: { whatsapp_followup: true, sms_fallback: true },
         created_at: nowIso(),
       }],
@@ -84,6 +85,7 @@ const normalizeBusiness = (b: Record<string, unknown>): Business => ({
   mrr: Number(b.mrr ?? 0),
   active_vibe: (b.active_vibe as string) ?? 'PRO_CLOSER',
   language: (b.language as string) ?? 'EN',
+  auto_language: b.auto_language !== false,
   settings: (b.settings as Business['settings']) ?? {},
   created_at: (b.created_at as string) ?? nowIso(),
 });
@@ -112,7 +114,7 @@ export async function getBusiness(id?: string | null): Promise<Business | null> 
 export async function updateBusiness(id: string, patch: Partial<Business>): Promise<Business> {
   const allowed = [
     'name', 'slug', 'owner_email', 'owner_name', 'outbound_number', 'plan',
-    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'settings',
+    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language', 'settings',
   ] as const;
   const clean: Record<string, unknown> = {};
   for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
@@ -143,6 +145,7 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     mrr: input.mrr ?? (input.plan === 'pro' ? 149 : input.plan === 'enterprise' ? 2400 : 49),
     active_vibe: input.active_vibe ?? 'PRO_CLOSER',
     language: input.language ?? 'EN',
+    auto_language: input.auto_language ?? true,
     settings: input.settings ?? { whatsapp_followup: true, sms_fallback: true },
   };
   if (!hasSupabase) {
@@ -453,6 +456,7 @@ const normalizeCall = (r: Record<string, unknown>): CallLog => ({
   phone: (r.phone as string) ?? null,
   skills_used: Array.isArray(r.skills_used) ? (r.skills_used as string[]) : [],
   vibe: (r.vibe as string) ?? null,
+  language: (r.language as string) ?? null,
   duration_seconds: Number(r.duration_seconds ?? 0),
   status: (r.status as string) ?? 'Initiated',
   recording_url: (r.recording_url as string) ?? null,
@@ -482,6 +486,7 @@ export async function createCallLog(input: Partial<CallLog>): Promise<CallLog> {
     phone: input.phone ?? null,
     skills_used: input.skills_used ?? [],
     vibe: input.vibe ?? null,
+    language: input.language ?? null,
     duration_seconds: input.duration_seconds ?? 0,
     status: input.status ?? 'Initiated',
     recording_url: input.recording_url ?? null,
@@ -626,6 +631,7 @@ function fallbackBusiness(): Business {
     mrr: 149,
     active_vibe: 'PRO_CLOSER',
     language: 'EN',
+    auto_language: true,
     settings: { whatsapp_followup: true, sms_fallback: true },
     created_at: nowIso(),
   };
@@ -738,6 +744,7 @@ export async function resolveBusinessForCall(id?: string | null): Promise<Resolv
       active_vibe: 'PRO_CLOSER',
       vibe: 'PRO_CLOSER',
       language: 'EN',
+      auto_language: true,
       settings: seed.settings,
     }
   );

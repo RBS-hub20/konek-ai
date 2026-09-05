@@ -32,6 +32,8 @@ export interface LanguageConfig {
   fallbackApproximate?: boolean;
   /** Extra delivery guidance, appended to the language instruction. */
   deliveryNote?: string;
+  /** Shown beside calls so the spoken language is readable at a glance. */
+  flag: string;
 }
 
 export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
@@ -40,6 +42,7 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     label: 'English',
     native: 'English',
     bcp47: 'en-US',
+    flag: '🇺🇸',
     instruction:
       'Speak English throughout. Use clear, natural, conversational English. Keep sentences short enough to say out loud.',
     twilioVoice: 'Polly.Matthew-Neural',
@@ -52,6 +55,7 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     label: 'Tagalog',
     native: 'Tagalog',
     bcp47: 'fil-PH',
+    flag: '🇵🇭',
     instruction:
       'Magsalita ka ng Tagalog sa buong tawag. Gumamit ng magalang at natural na Tagalog, gamit ang "po" at "opo". Iwasan ang masyadong malalim na salita — dapat parang normal na usapan.',
     /* Twilio/Polly has no Filipino voice; the English-PH voice is the closest. */
@@ -66,6 +70,7 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     label: 'Taglish',
     native: 'Taglish',
     bcp47: 'fil-PH',
+    flag: '🇵🇭',
     instruction:
       'Speak natural Taglish — the everyday Filipino mix of Tagalog and English, the way people actually talk in Metro Manila. Use "po" and "opo" for politeness. Keep English for product names, numbers and prices; use Tagalog for the connective, friendly parts.',
     twilioVoice: 'Polly.Joanna-Neural',
@@ -79,6 +84,7 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     label: 'Arabic',
     native: 'العربية',
     bcp47: 'ar-AE',
+    flag: '🇦🇪',
     instruction:
       'تحدّث بالعربية طوال المكالمة. استخدم لهجة خليجية مهذبة وواضحة وقريبة من الحديث اليومي. اجعل الجمل قصيرة ومناسبة للنطق.',
     twilioVoice: 'Polly.Zeina',
@@ -89,6 +95,7 @@ export const LANGUAGES: Record<LanguageKey, LanguageConfig> = {
     label: 'Hindi',
     native: 'हिन्दी',
     bcp47: 'hi-IN',
+    flag: '🇮🇳',
     instruction:
       'पूरी कॉल में हिन्दी में बात करें। सरल, विनम्र और रोज़मर्रा की हिन्दी का प्रयोग करें। वाक्य छोटे रखें ताकि बोलने में स्वाभाविक लगें।',
     twilioVoice: 'Polly.Aditi',
@@ -174,3 +181,7 @@ export const SAMPLES: Record<VibeKey, Record<LanguageKey, string>> = {
     HI: 'नमस्ते रेनमार, मैं नोवा क्लिनिक से काई बोल रहा हूँ। उम्मीद है मैंने गलत समय पर कॉल नहीं किया। बस आपके अपॉइंटमेंट के बारे में जानना था, और कोई सवाल हो तो बताइए। आराम से।',
   },
 };
+
+/** Flag for a stored language code, for tables and feeds. */
+export const languageFlag = (v: string | null | undefined): string =>
+  v ? LANGUAGES[languageToKey(v)].flag : '';

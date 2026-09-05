@@ -8,6 +8,7 @@ import { Waveform } from '@/components/ui/Waveform';
 import { Select } from '@/components/ui/Input';
 import { useKonekStore } from '@/lib/store';
 import { vibeToLabel, type CallLog } from '@/lib/types2';
+import { LANGUAGES, languageFlag, languageToKey } from '@/lib/ai/languages';
 import { cn } from '@/lib/utils';
 
 const statusTone = (s: string) =>
@@ -74,13 +75,14 @@ export function CallLogsTab() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-left">
+            <table className="w-full min-w-[1120px] text-left">
               <thead>
                 <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                   <th className="px-5 py-3 font-medium">Customer</th>
                   <th className="px-5 py-3 font-medium">Phone</th>
                   <th className="px-5 py-3 font-medium">Skills Used</th>
                   <th className="px-5 py-3 font-medium">Vibe</th>
+                  <th className="px-5 py-3 font-medium">Language</th>
                   <th className="px-5 py-3 font-medium">Duration</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="px-5 py-3 font-medium">Recording</th>
@@ -101,6 +103,13 @@ export function CallLogsTab() {
                         </div>
                       </td>
                       <td className="px-5 py-4 text-[12px] text-muted">{c.vibe ? vibeToLabel(c.vibe) : '—'}</td>
+                      <td className="px-5 py-4 text-[12px] text-muted">
+                        {c.language ? (
+                          <span title={LANGUAGES[languageToKey(c.language)].label}>
+                            {languageFlag(c.language)} {LANGUAGES[languageToKey(c.language)].label}
+                          </span>
+                        ) : '—'}
+                      </td>
                       <td className="px-5 py-4 text-[12px] tabular-nums text-ink">
                         {Math.floor(c.duration_seconds / 60)}:{String(c.duration_seconds % 60).padStart(2, '0')}
                       </td>

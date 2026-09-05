@@ -3,6 +3,7 @@ import { config, voiceForVibe, useCartesia } from './config.js';
 import { log } from './log.js';
 import { fetchCallConfig, reportCall } from './konek.js';
 import { CartesiaStream } from './cartesia.js';
+import { LanguageTracker } from './detect.js';
 
 /* ═══════════════════════════════════════════════════════════════════
    One phone call.
@@ -44,6 +45,13 @@ export class CallSession {
     this.tts = null;
     this.ttsFailed = false;
     this.language = 'EN';
+
+    /* Auto language adaptation. The tracker only moves after two consecutive
+       turns in a new language, or one explicit request. */
+    this.tracker = null;
+    this.autoLanguage = false;
+    this.languagesUsed = new Set();
+    this.switching = false;
 
     this.twilio.on('message', (raw) => this.onTwilioMessage(raw));
     this.twilio.on('close', () => this.end('Completed'));
@@ -115,6 +123,15 @@ export class CallSession {
 
     this.stage = 'resolving voice';
     this.language = callCfg.language ?? this.params.language ?? 'EN';
+    this.startedLanguage = this.language;
+    this.languagesUsed.add(this.language);
+
+    /* The business setting decides; a Twilio parameter can override per call. */
+    this.autoLanguage = this.params.autoLanguage != null
+      ? this.params.autoLanguage === 'true'
+      : Boolean(callCfg.autoLanguage);
+    this.tracker = new LanguageTracker(this.language);
+    if (this.autoLanguage) log.info('lang', `auto-detect on, starting in ${this.language}`);
 
     /* Bring Sonic up before the model starts talking. If it cannot connect we
        fall back to OpenAI's own voice rather than leaving the caller silent. */
@@ -156,6 +173,7 @@ export class CallSession {
       /* With Sonic speaking, the model only needs to produce text — asking it
          for audio as well would bill for a voice nobody hears. */
       const wantAudio = !this.tts;
+      this.baseInstructions = callCfg.systemPrompt;
       const vad = {
         type: 'server_vad',
         threshold: config.vadThreshold,
@@ -274,7 +292,10 @@ export class CallSession {
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
-        if (evt.transcript) this.addTranscript('Customer', evt.transcript);
+        if (evt.transcript) {
+          this.addTranscript('Customer', evt.transcript);
+          if (this.autoLanguage) this.considerLanguage(evt.transcript);
+        }
         break;
 
       case 'response.done':
@@ -298,6 +319,67 @@ export class CallSession {
           log.info('openai', `first seen: ${evt.type}`);
         }
         break;
+    }
+  }
+
+  /**
+   * Adapts to the caller's language mid-call.
+   *
+   * The switch is deliberately unannounced — a person who starts replying in
+   * English simply gets English back, they do not get told about it.
+   */
+  considerLanguage(transcript) {
+    if (!this.tracker || this.switching) return;
+    const { switched, to, explicit } = this.tracker.observe(transcript);
+    if (!switched || to === this.language) return;
+
+    log.info('lang', `${this.language} -> ${to}${explicit ? ' (asked for it)' : ''}`);
+    void this.switchLanguage(to, explicit);
+  }
+
+  async switchLanguage(lang, explicit) {
+    this.switching = true;
+    const previous = this.language;
+    try {
+      /* Sonic needs a voice that speaks the new language, so the stream is
+         rebuilt rather than retuned. */
+      if (this.tts) {
+        const next = new CartesiaStream({
+          language: lang,
+          onAudio: (b64) => this.playAudio(b64),
+          onError: () => this.failoverToOpenAIVoice(),
+        });
+        await next.connect();
+        const old = this.tts;
+        this.tts = next;
+        try { old.close(); } catch { /* already gone */ }
+      }
+
+      this.language = lang;
+      this.languagesUsed.add(lang);
+
+      /* Tell the model to follow, without telling the caller. */
+      this.sendOpenAI({
+        type: 'session.update',
+        session: this.betaShape
+          ? { instructions: `${this.baseInstructions}
+
+## LANGUAGE NOW
+The customer is speaking ${lang}. Reply in ${lang} from now on. Do not mention the change or apologise for it — just continue naturally.` }
+          : { type: 'realtime', instructions: `${this.baseInstructions}
+
+## LANGUAGE NOW
+The customer is speaking ${lang}. Reply in ${lang} from now on. Do not mention the change or apologise for it — just continue naturally.` },
+      });
+
+      log.info('lang', `now speaking ${lang}${this.tts ? ` as ${this.tts.voice?.name}` : ''}`);
+    } catch (err) {
+      /* Keep the call in the language that still works. */
+      this.language = previous;
+      log.warn('lang', `could not switch to ${lang}: ${err.message}`);
+    } finally {
+      this.switching = false;
+      void explicit;
     }
   }
 
@@ -396,6 +478,11 @@ export class CallSession {
         status: status === 'Completed' && spoke ? 'Connected' : status,
         durationSeconds,
         transcript: this.transcript.join('\n'),
+        /* What they actually ended up speaking, not what was configured. */
+        language: this.language,
+        startedLanguage: this.startedLanguage,
+        languagesUsed: Array.from(this.languagesUsed),
+        languageSwitches: this.tracker?.switches ?? 0,
       });
     }
   }

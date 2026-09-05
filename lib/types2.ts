@@ -34,6 +34,8 @@ export interface Business {
   mrr: number;
   active_vibe: string;
   language: string;
+  /** Mirror the caller's language mid-call. */
+  auto_language: boolean;
   settings: BusinessSettings;
   created_at: string;
 }
@@ -91,6 +93,8 @@ export interface CallLog {
   phone: string | null;
   skills_used: string[];
   vibe: string | null;
+  /** The language actually spoken by the end of the call. */
+  language: string | null;
   duration_seconds: number;
   status: CallStatus | string;
   recording_url: string | null;

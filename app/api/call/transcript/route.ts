@@ -24,6 +24,7 @@ export async function POST(req: Request) {
     let duration: number | undefined;
     let status: string | undefined;
     let recordingUrl: string | undefined;
+    let language: string | undefined;
 
     if (contentType.includes('application/json')) {
       const b = (await req.json()) as Record<string, unknown>;
@@ -33,6 +34,8 @@ export async function POST(req: Request) {
       duration = num(b.duration) ?? num(b.duration_seconds);
       status = str(b.status);
       recordingUrl = str(b.recordingUrl) ?? str(b.recording_url);
+      /* What the caller actually ended up speaking. */
+      language = str(b.language);
     } else {
       const form = await req.formData();
       twilioSid = (form.get('CallSid') as string) ?? undefined;
@@ -55,6 +58,7 @@ export async function POST(req: Request) {
     if (typeof duration === 'number') patch.duration_seconds = duration;
     if (status) patch.status = status;
     if (recordingUrl) patch.recording_url = recordingUrl;
+    if (language) patch.language = language;
 
     if (!Object.keys(patch).length) return ok({ callId, updated: false });
 

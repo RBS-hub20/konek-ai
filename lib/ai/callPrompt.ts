@@ -40,9 +40,22 @@ export function buildCallPrompt({
 
   /* Language comes first: it governs every other instruction below. */
   parts.push(
-    `## LANGUAGE — ${lang.label}\n${lang.instruction}\nIf the customer switches language, follow them.` +
+    `## LANGUAGE — ${lang.label}\n${lang.instruction}` +
       (lang.deliveryNote ? `\n${lang.deliveryNote}` : '')
   );
+
+  if (business.auto_language !== false) {
+    parts.push(
+      '## FOLLOW THE CUSTOMER\n' +
+        `You are multilingual. Open in ${lang.label}, then mirror whatever the customer speaks.\n` +
+        '- They answer in English → reply in English, and stay there.\n' +
+        '- They answer in Tagalog or Taglish → reply the same way, with "po" used naturally.\n' +
+        '- They answer in Arabic or Hindi → switch to it entirely.\n' +
+        '- Never force a language on someone who is not using it.\n' +
+        '- Switch without commenting on it. No "ah, English pala" and no apology — just answer in their language as if it was always the plan.\n' +
+        '- A single borrowed word is not a language change. People say "okay" and "yes" in every language.'
+    );
+  }
 
   parts.push(`## VOICE & TONE — ${v.label}\n${v.style}`);
 

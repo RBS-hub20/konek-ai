@@ -58,11 +58,15 @@ function fallbackConfig(vibe, language) {
     opener: 'Hi, this is Kai. Can you hear me okay?',
     skillsUsed: [],
     goal: 'Explain',
+    autoLanguage: true,
   };
 }
 
 /** Writes the finished call back to call_logs. */
-export async function reportCall({ callSid, status, durationSeconds, transcript }) {
+export async function reportCall({
+  callSid, status, durationSeconds, transcript,
+  language, startedLanguage, languagesUsed, languageSwitches,
+}) {
   try {
     const res = await fetch(`${config.appUrl}/api/call/transcript`, {
       method: 'POST',
@@ -72,6 +76,10 @@ export async function reportCall({ callSid, status, durationSeconds, transcript 
         status,
         duration: durationSeconds,
         transcript,
+        language,
+        startedLanguage,
+        languagesUsed,
+        languageSwitches,
       }),
       signal: AbortSignal.timeout(8000),
     });

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
+import { Switch } from '@/components/ui/Switch';
 import { Waveform } from '@/components/ui/Waveform';
 import { VIBE_CONFIG } from '@/lib/ai/vibes';
 import { LANGUAGES, LANGUAGE_KEYS, SAMPLES, type LanguageKey } from '@/lib/ai/languages';
@@ -16,7 +17,8 @@ const SEEDS: Record<VibeKey, number> = {
 };
 
 export function VibeModeTab() {
-  const { vibe, setVibe, language, setLanguage, business } = useKonekStore();
+  const { vibe, setVibe, language, setLanguage, business, setBusinessField } = useKonekStore();
+  const autoLanguage = business?.auto_language !== false;
   const [testOpen, setTestOpen] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const detail = VIBE_CONFIG[vibe];
@@ -90,6 +92,24 @@ export function VibeModeTab() {
             </button>
           ))}
         </div>
+        {/* Adaptation is what most callers actually notice, so it sits with
+            the language choice rather than buried in Settings. */}
+        <div className="mt-4 flex items-start justify-between gap-4 rounded-brand border border-line bg-paper p-4">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-ink">Auto-detect language</div>
+            <p className="mt-1 text-[12px] leading-relaxed text-muted">
+              {autoLanguage
+                ? `KONEK opens in ${lang.label} and then follows the customer — answer in English and it stays in English, answer in Arabic and it switches. It never announces the change.`
+                : `Every call stays in ${lang.label}, whatever the customer speaks.`}
+            </p>
+          </div>
+          <Switch
+            checked={autoLanguage}
+            onCheckedChange={(v) => void setBusinessField({ auto_language: v })}
+            label="Auto-detect language"
+          />
+        </div>
+
         {lang.fallbackApproximate && (
           <p className="mt-2.5 text-[11px] leading-relaxed text-muted">
             Twilio has no Filipino voice, so without the conversation bridge the fallback reads this with an
