@@ -20,6 +20,8 @@ export interface SchemaHealth {
   missingColumns?: string[];
   tables?: Record<string, unknown>;
   fix?: string;
+  /** ALTER statements for exactly the columns this database lacks. */
+  repairSql?: string;
 }
 
 interface Ctx {

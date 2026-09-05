@@ -105,11 +105,28 @@ export default function SchemaHealthPage() {
                   survive a reload.</li>
               )}
             </ul>
-            <p className="mt-4 rounded-brand bg-surface p-3 text-[12px] leading-relaxed text-muted">
-              Fix: paste <span className="font-mono text-ink">supabase.sql</span> into the Supabase SQL Editor and run it.
-              It is additive, safe to re-run, and ends with <span className="font-mono text-ink">NOTIFY pgrst</span> so the
-              schema cache reloads immediately.
-            </p>
+            {schema?.repairSql && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[12px] text-muted">
+                    Paste this into the Supabase SQL Editor — it adds only what is missing here.
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(schema.repairSql ?? '');
+                      setNotice('Repair SQL copied.');
+                    }}
+                  >
+                    Copy SQL
+                  </Button>
+                </div>
+                <pre className="mt-2 max-h-64 overflow-auto rounded-brand bg-surface p-3 font-mono text-[11px] leading-relaxed text-ink">
+{schema.repairSql}
+                </pre>
+              </div>
+            )}
           </>
         )}
       </section>
