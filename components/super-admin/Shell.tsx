@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
-  Activity, Building2, CreditCard, LayoutDashboard, Megaphone, Menu,
-  PhoneCall, Settings as SettingsIcon, X,
+  Activity, Building2, CreditCard, LayoutDashboard, LogOut, Megaphone, Menu,
+  PhoneCall, Settings as SettingsIcon, ShieldCheck, X,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { StatusDot } from '@/components/ui/Badge';
@@ -37,8 +38,32 @@ const SERVICES = [
 
 export function SuperAdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  /* The login page is inside this route but outside the console. */
+  if (pathname === '/super-admin/login') return <>{children}</>;
+
+  return <Console pathname={pathname} router={router}>{children}</Console>;
+}
+
+function Console({ pathname, router, children }: {
+  pathname: string;
+  router: ReturnType<typeof useRouter>;
+  children: React.ReactNode;
+}) {
   const { businesses, services, schema, duplicates } = useSuperAdmin();
   const [navOpen, setNavOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const logout = async () => {
+    setLoggingOut(true);
+    try {
+      await fetch('/api/super-admin/logout', { method: 'POST' });
+    } finally {
+      router.replace('/super-admin/login');
+      router.refresh();
+    }
+  };
 
   const schemaBroken = schema?.healthy === false;
 
@@ -151,9 +176,23 @@ export function SuperAdminShell({ children }: { children: React.ReactNode }) {
           <h1 className="font-display text-[14px] font-semibold text-ink">
             {NAV.find((n) => pathname.startsWith(n.href))?.label ?? 'Overview'}
           </h1>
-          <Link href="/admin" className="ml-auto text-[12px] text-muted transition-colors hover:text-ink">
-            Business dashboard
-          </Link>
+          <div className="ml-auto flex items-center gap-3">
+            <span className="hidden items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11px] text-muted sm:flex">
+              <ShieldCheck className="h-3 w-3 text-emerald-500" />
+              Exclusive access · session active
+            </span>
+            <Link href="/admin" className="text-[12px] text-muted transition-colors hover:text-ink">
+              Business dashboard
+            </Link>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              disabled={loggingOut}
+              className="flex items-center gap-1.5 rounded-brand border border-line px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:text-ink focus-ring"
+            >
+              <LogOut className="h-3 w-3" /> {loggingOut ? 'Signing out…' : 'Logout'}
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 px-5 py-8 md:px-8">{children}</main>

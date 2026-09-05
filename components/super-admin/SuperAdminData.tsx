@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { api, tryApi } from '@/lib/apiClient';
 import type { Business, CallLog } from '@/lib/types2';
 
@@ -45,6 +46,10 @@ const SuperAdminContext = createContext<Ctx>({
 export const useSuperAdmin = () => useContext(SuperAdminContext);
 
 export function SuperAdminProvider({ children }: { children: React.ReactNode }) {
+  /* The login page sits under /super-admin but is outside the wall, so it must
+     not fire the requests the wall would reject. */
+  const pathname = usePathname();
+  const onLogin = pathname === '/super-admin/login';
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [stats, setStats] = useState<Stats>(EMPTY);
   const [calls, setCalls] = useState<CallLog[]>([]);
@@ -70,7 +75,10 @@ export function SuperAdminProvider({ children }: { children: React.ReactNode }) 
     setLoading(false);
   }, []);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    if (onLogin) { setLoading(false); return; }
+    void reload();
+  }, [reload, onLogin]);
 
   return (
     <SuperAdminContext.Provider
