@@ -207,20 +207,36 @@ export const SCRIPT_COUNTRIES = ['PH', 'AE', 'ALL'] as const;
 
 export interface ScriptStep {
   step: ScriptStepName;
-  text_ph: string;
-  text_ae: string;
+  /** One language per script — the country already chose it. */
+  text?: string;
+  /** Kept for scripts written before the split was removed. */
+  text_ph?: string;
+  text_ae?: string;
   /** Silence after this step, rendered as sentence breaks for the voice. */
   pause_ms: number;
+}
+
+/** The line for a step, whichever shape the script was written in. */
+export function stepText(step: ScriptStep | undefined, country?: string | null): string {
+  if (!step) return '';
+  if (step.text?.trim()) return step.text;
+  const ph = (country ?? '').toUpperCase() === 'PH';
+  return (ph ? step.text_ph : step.text_ae) || step.text_ph || step.text_ae || '';
 }
 
 export interface VoiceSettings {
   speed: number;
   emotion: string;
   pause_ms: number;
+  barge_in?: boolean;
+  /** PH-direct opens in Taglish, AE-direct in English — never announced. */
+  language_mode?: 'PH-direct' | 'AE-direct';
 }
 
 export interface OutboundScript {
   id: string;
+  /** Ships with the product: editable by copy, not by deletion. */
+  is_builtin?: boolean;
   name: string;
   industry: string;
   vibe: string;

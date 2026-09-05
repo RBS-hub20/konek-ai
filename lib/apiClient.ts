@@ -92,6 +92,7 @@ export const api = {
     req<{ scripts: OutboundScript[]; wouldUse?: OutboundScript | null }>(
       `/api/scripts${industry || country ? `?industry=${industry ?? ''}&country=${country ?? ''}` : ''}`
     ),
+  seedScripts: () => req<{ created: number; updated: number; total: number; names: string[] }>('/api/outbound/seed', { method: 'POST' }),
   saveScript: (script: Partial<OutboundScript> & { setDefault?: boolean }) =>
     req<{ script: OutboundScript }>('/api/scripts', { method: 'POST', body: JSON.stringify(script) }),
   deleteScript: (id: string) => req<{ deleted: string }>(`/api/scripts?id=${id}`, { method: 'DELETE' }),

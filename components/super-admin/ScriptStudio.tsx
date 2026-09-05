@@ -1,14 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Play, Plus, Star, Trash2 } from 'lucide-react';
+import { Copy, Download, Play, Plus, Star, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { api, tryApi } from '@/lib/apiClient';
 import {
-  DEFAULT_VOICE_SETTINGS, SCRIPT_COUNTRIES, SCRIPT_INDUSTRIES, SCRIPT_STEPS,
+  DEFAULT_VOICE_SETTINGS, stepText, SCRIPT_COUNTRIES, SCRIPT_INDUSTRIES, SCRIPT_STEPS,
   SCRIPT_VIBES, renderScript, type OutboundScript, type ScriptStep,
 } from '@/lib/types2';
 import { cn } from '@/lib/utils';
@@ -24,7 +24,7 @@ const blankScript = (): Partial<OutboundScript> => ({
   is_active: true,
   is_default: false,
   voice_settings: { ...DEFAULT_VOICE_SETTINGS },
-  script_steps: SCRIPT_STEPS.map((step) => ({ step, text_ph: '', text_ae: '', pause_ms: 400 })),
+  script_steps: SCRIPT_STEPS.map((step) => ({ step, text: '', pause_ms: 400 })),
 });
 
 export function ScriptStudio() {
@@ -36,6 +36,20 @@ export function ScriptStudio() {
   const [filterIndustry, setFilterIndustry] = useState('all');
   const [filterVibe, setFilterVibe] = useState('all');
   const [previewing, setPreviewing] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+
+  const seed = async () => {
+    setSeeding(true); setNotice(null);
+    try {
+      const res = await api.seedScripts();
+      setNotice(`Loaded ${res.created + res.updated} built-in script${res.created + res.updated === 1 ? '' : 's'}.`);
+      await load();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not load the built-in scripts');
+    } finally {
+      setSeeding(false);
+    }
+  };
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const load = useCallback(async () => {
@@ -95,6 +109,9 @@ export function ScriptStudio() {
     }
   };
 
+  /* A built-in is the product's, not the operator's: copy it to change it. */
+  const locked = editing?.is_builtin === true;
+
   const setStep = (name: string, patch: Partial<ScriptStep>) => {
     if (!editing) return;
     const steps = (editing.script_steps ?? []).map((s) => (s.step === name ? { ...s, ...patch } : s));
@@ -110,12 +127,17 @@ export function ScriptStudio() {
             <Badge tone="accent">New</Badge>
           </div>
           <p className="mt-0.5 text-[12px] text-muted">
-            What Cindy says, per industry and country. A written line beats an improvised one on a phone line.
+            Built-in professional scripts are active. Customising is optional — duplicate one to make it yours.
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setEditing(blankScript())}>
-          <Plus className="h-3.5 w-3.5" /> New script
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" className="gap-1.5" disabled={seeding} onClick={() => void seed()}>
+            <Download className="h-3.5 w-3.5" /> {seeding ? 'Loading…' : 'Load built-in'}
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setEditing(blankScript())}>
+            <Plus className="h-3.5 w-3.5" /> New script
+          </Button>
+        </div>
       </div>
 
       {notice && <p className="border-b border-line px-5 py-3 text-[12px] text-muted">{notice}</p>}
@@ -137,9 +159,18 @@ export function ScriptStudio() {
           {loading ? (
             <p className="px-5 py-8 text-[13px] text-muted">Loading…</p>
           ) : shown.length === 0 ? (
-            <p className="px-5 py-8 text-[13px] text-muted">
-              No scripts yet. Run supabase.sql to load the four professional defaults, or write one.
-            </p>
+            <div className="px-5 py-8">
+              <p className="text-[13px] text-muted">
+                {scripts.length === 0
+                  ? 'No scripts yet. Load the built-in professional ones and Cindy is ready to call.'
+                  : 'Nothing matches these filters.'}
+              </p>
+              {scripts.length === 0 && (
+                <Button size="sm" className="mt-4 gap-1.5" disabled={seeding} onClick={() => void seed()}>
+                  <Download className="h-3.5 w-3.5" /> {seeding ? 'Loading…' : 'Load built-in scripts'}
+                </Button>
+              )}
+            </div>
           ) : (
             <ul className="divide-y divide-line">
               {shown.map((s) => (
@@ -151,6 +182,7 @@ export function ScriptStudio() {
                         <span className="truncate text-[13px] font-medium text-ink">{s.name}</span>
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {s.is_builtin ? <Badge tone="accent">built-in</Badge> : <Badge>custom</Badge>}
                         <Badge>{s.industry}</Badge>
                         <Badge tone={s.vibe === 'professional' ? 'accent' : 'default'}>{s.vibe}</Badge>
                         <Badge>{s.country}</Badge>
@@ -168,11 +200,13 @@ export function ScriptStudio() {
                         className="rounded p-1.5 text-muted hover:text-ink focus-ring">
                         <Star className="h-3.5 w-3.5" />
                       </button>
-                      <button type="button" title="Delete"
-                        onClick={async () => { if (confirm(`Delete “${s.name}”?`)) { await api.deleteScript(s.id); setEditing(null); await load(); } }}
-                        className="rounded p-1.5 text-muted hover:text-red-500 focus-ring">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {!s.is_builtin && (
+                        <button type="button" title="Delete"
+                          onClick={async () => { if (confirm(`Delete “${s.name}”?`)) { await api.deleteScript(s.id); setEditing(null); await load(); } }}
+                          className="rounded p-1.5 text-muted hover:text-red-500 focus-ring">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </li>
@@ -189,6 +223,18 @@ export function ScriptStudio() {
             </p>
           ) : (
             <div className="space-y-6">
+              {locked && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-brand border border-line bg-surface p-3">
+                  <span className="text-[12px] text-muted">
+                    This is a built-in script. Duplicate it to make changes of your own.
+                  </span>
+                  <Button size="sm" variant="secondary" className="gap-1.5"
+                    onClick={() => setEditing({ ...editing, id: undefined, name: `${editing.name} (custom)`, is_builtin: false, is_default: false })}>
+                    <Copy className="h-3.5 w-3.5" /> Duplicate &amp; customise
+                  </Button>
+                </div>
+              )}
+
               <div className="grid gap-4 md:grid-cols-4">
                 <Field label="Name"><Input value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Professional Laundry PH" /></Field>
                 <Field label="Industry">
@@ -253,21 +299,24 @@ export function ScriptStudio() {
               <div className="space-y-4">
                 {SCRIPT_STEPS.map((name) => {
                   const step = editing.script_steps?.find((s) => s.step === name)
-                    ?? { step: name, text_ph: '', text_ae: '', pause_ms: 400 };
-                  const preview = renderScript(step.text_ph || step.text_ae, SAMPLE);
+                    ?? { step: name, text: '', pause_ms: 400 };
+                  const preview = renderScript(stepText(step, editing.country), SAMPLE);
                   return (
                     <div key={name} className="rounded-brand border border-line p-4">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-[13px] font-medium capitalize text-ink">{name}</span>
                         <span className="text-[11px] text-muted">{'{{company}} {{contact}} {{industry}}'}</span>
                       </div>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <Field label="Philippines (Taglish)">
-                          <Textarea value={step.text_ph} onChange={(e) => setStep(name, { text_ph: e.target.value })} className="min-h-[110px]" />
-                        </Field>
-                        <Field label="Gulf (English)">
-                          <Textarea value={step.text_ae} onChange={(e) => setStep(name, { text_ae: e.target.value })} className="min-h-[110px]" />
-                        </Field>
+                      <div className="mt-3">
+                        <Textarea
+                          value={stepText(step, editing.country)}
+                          onChange={(e) => setStep(name, { text: e.target.value, text_ph: '', text_ae: '' })}
+                          className="min-h-[110px]"
+                          placeholder={editing.country === 'PH'
+                            ? 'Taglish — spoken from the first word, never announced.'
+                            : 'English — clear and unhurried.'}
+                          disabled={locked}
+                        />
                       </div>
                       {preview && (
                         <p className="mt-3 rounded-brand bg-surface p-3 text-[12px] leading-relaxed text-muted">
@@ -280,7 +329,7 @@ export function ScriptStudio() {
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-line pt-4">
-                <Button size="sm" onClick={() => void save(false)} disabled={saving}>
+                <Button size="sm" onClick={() => void save(false)} disabled={saving || locked}>
                   {saving ? 'Saving…' : 'Save script'}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => void save(true)} disabled={saving}>

@@ -70,6 +70,7 @@ const COLUMN_TYPES: Record<string, string> = {
   script_steps: "jsonb default '[]'::jsonb",
   voice_settings: "jsonb default '{\"speed\":0.92,\"emotion\":\"professional\",\"pause_ms\":400}'::jsonb",
   is_default: 'boolean default false',
+  is_builtin: 'boolean default false',
   key: 'text primary key',
   updated_at: 'timestamptz default now()',
   notes: 'text',
@@ -138,7 +139,7 @@ const EXPECTED: Record<string, string[]> = {
   ],
   outbound_scripts: [
     'id', 'name', 'industry', 'vibe', 'country', 'script_steps', 'voice_settings',
-    'is_active', 'is_default', 'created_at',
+    'is_active', 'is_default', 'is_builtin', 'created_at',
   ],
   services: ['id', 'business_id', 'name', 'price', 'description', 'duration', 'category', 'is_active', 'sort_order', 'created_at'],
   leads: [

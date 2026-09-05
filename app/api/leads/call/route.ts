@@ -1,5 +1,6 @@
 import { getBusinessForRead, getLead, pickScript, safe, updateLead } from '@/lib/server/tenant';
-import { renderScript, type OutboundScript } from '@/lib/types2';
+import { type OutboundScript } from '@/lib/types2';
+import { buildOpenerLine } from '@/lib/voice/cindyReceptionist';
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
 import { guardCall } from '@/lib/server/operator';
 import { normalizePhone } from '@/lib/server/phone';
@@ -49,7 +50,10 @@ export async function POST(req: Request) {
       contact: lead.contact_person ?? '',
       industry: lead.industry ?? 'business',
     };
-    const opener = openerFrom(script, lead.country, vars);
+    const opener = buildOpenerLine({
+      script, company: lead.company, contact: lead.contact_person,
+      industry: lead.industry, country: lead.country,
+    });
 
     let twilioSid: string | null = null;
     let status = 'Calling';
@@ -136,22 +140,6 @@ function twilioHint(code: number | string | undefined | null, country: string | 
     default:
       return undefined;
   }
-}
-
-/** The opener for this lead, from the script, in the right column. */
-function openerFrom(
-  script: OutboundScript | null,
-  country: string | null,
-  vars: Record<string, string>
-): string {
-  const step = script?.script_steps?.find((s) => s.step === 'opener');
-  if (step) {
-    const text = country === 'PH' ? step.text_ph : step.text_ae || step.text_ph;
-    const rendered = renderScript(text, vars);
-    if (rendered) return rendered;
-  }
-  const who = vars.contact ? `${vars.contact}, ` : '';
-  return `Good morning ${who}this is Cindy, from Konek A I. Do you have thirty seconds?`;
 }
 
 /**

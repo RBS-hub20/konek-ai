@@ -1148,6 +1148,7 @@ const normalizeScript = (r: Record<string, unknown>): OutboundScript => ({
   voice_settings: { ...DEFAULT_VOICE_SETTINGS, ...((r.voice_settings as object) ?? {}) },
   is_active: r.is_active !== false,
   is_default: r.is_default === true,
+  is_builtin: r.is_builtin === true,
   created_at: (r.created_at as string) ?? nowIso(),
 });
 
@@ -1175,6 +1176,7 @@ export async function saveScript(input: Partial<OutboundScript>): Promise<Outbou
     voice_settings: { ...DEFAULT_VOICE_SETTINGS, ...(input.voice_settings ?? {}) },
     is_active: input.is_active ?? true,
     is_default: input.is_default ?? false,
+    is_builtin: input.is_builtin ?? false,
   };
 
   if (!hasSupabase) {

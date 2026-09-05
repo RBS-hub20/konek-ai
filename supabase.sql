@@ -192,6 +192,7 @@ alter table outbound_scripts add column if not exists script_steps   jsonb defau
 alter table outbound_scripts add column if not exists voice_settings jsonb default '{"speed":0.92,"emotion":"professional","pause_ms":400}'::jsonb;
 alter table outbound_scripts add column if not exists is_active      boolean default true;
 alter table outbound_scripts add column if not exists is_default     boolean default false;
+alter table outbound_scripts add column if not exists is_builtin     boolean default false;
 
 create index if not exists outbound_scripts_pick_idx
   on outbound_scripts (industry, country, is_default);
