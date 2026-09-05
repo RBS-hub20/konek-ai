@@ -46,6 +46,8 @@ function mem(): Mem {
         active_vibe: 'PRO_CLOSER',
         language: 'EN',
         auto_language: true,
+        handoff_number: null,
+        handoff_enabled: true,
         settings: { whatsapp_followup: true, sms_fallback: true },
         created_at: nowIso(),
       }],
@@ -86,6 +88,8 @@ const normalizeBusiness = (b: Record<string, unknown>): Business => ({
   active_vibe: (b.active_vibe as string) ?? 'PRO_CLOSER',
   language: (b.language as string) ?? 'EN',
   auto_language: b.auto_language !== false,
+  handoff_number: (b.handoff_number as string) ?? null,
+  handoff_enabled: b.handoff_enabled !== false,
   settings: (b.settings as Business['settings']) ?? {},
   created_at: (b.created_at as string) ?? nowIso(),
 });
@@ -114,7 +118,7 @@ export async function getBusiness(id?: string | null): Promise<Business | null> 
 export async function updateBusiness(id: string, patch: Partial<Business>): Promise<Business> {
   const allowed = [
     'name', 'slug', 'owner_email', 'owner_name', 'outbound_number', 'plan',
-    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language', 'settings',
+    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language', 'handoff_number', 'handoff_enabled', 'settings',
   ] as const;
   const clean: Record<string, unknown> = {};
   for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
@@ -146,6 +150,8 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     active_vibe: input.active_vibe ?? 'PRO_CLOSER',
     language: input.language ?? 'EN',
     auto_language: input.auto_language ?? true,
+    handoff_number: input.handoff_number ?? null,
+    handoff_enabled: input.handoff_enabled ?? true,
     settings: input.settings ?? { whatsapp_followup: true, sms_fallback: true },
   };
   if (!hasSupabase) {
@@ -666,6 +672,8 @@ function fallbackBusiness(): Business {
     active_vibe: 'PRO_CLOSER',
     language: 'EN',
     auto_language: true,
+    handoff_number: null,
+    handoff_enabled: true,
     settings: { whatsapp_followup: true, sms_fallback: true },
     created_at: nowIso(),
   };

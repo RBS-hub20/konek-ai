@@ -47,6 +47,8 @@ const COLUMN_TYPES: Record<string, string> = {
   is_active: 'boolean default false',
   is_connected: 'boolean default false',
   auto_language: 'boolean default true',
+  handoff_enabled: 'boolean default true',
+  handoff_number: 'text',
   settings: "jsonb default '{}'::jsonb",
   knowledge_files: "jsonb default '[]'::jsonb",
   skills_used: "text[] default '{}'",
@@ -96,7 +98,8 @@ function repairSql(missingColumns: string[], missingTables: string[]): string {
 const EXPECTED: Record<string, string[]> = {
   businesses: [
     'id', 'name', 'slug', 'owner_email', 'outbound_number', 'plan', 'calls_used',
-    'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'settings', 'created_at',
+    'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language',
+    'handoff_number', 'handoff_enabled', 'settings', 'created_at',
   ],
   call_logs: [
     'id', 'business_id', 'campaign_id', 'contact_id', 'customer_name', 'phone',

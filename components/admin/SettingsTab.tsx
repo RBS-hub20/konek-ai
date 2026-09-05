@@ -14,6 +14,8 @@ export function SettingsTab() {
   const { business, setBusinessField } = useKonekStore();
 
   const [number, setNumber] = useState('');
+  const [handoff, setHandoff] = useState('');
+  const [savingHandoff, setSavingHandoff] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,8 +26,20 @@ export function SettingsTab() {
   });
 
   useEffect(() => {
-    if (business) setNumber(business.outbound_number ?? '');
+    if (business) {
+      setNumber(business.outbound_number ?? '');
+      setHandoff(business.handoff_number ?? '');
+    }
   }, [business]);
+
+  const saveHandoff = async () => {
+    setSavingHandoff(true);
+    try {
+      await setBusinessField({ handoff_number: handoff.trim() || null });
+    } finally {
+      setSavingHandoff(false);
+    }
+  };
 
   useEffect(() => {
     const n = business?.outbound_number;
@@ -141,6 +155,54 @@ export function SettingsTab() {
                 onCheckedChange={(v) => setChannel('sms_fallback', v)}
                 label="SMS fallback"
               />
+            </div>
+          </div>
+        </section>
+
+        {/* Human handoff */}
+        <section className="rounded-brand border border-line bg-paper p-6">
+          <h2 className="font-display text-[14px] font-semibold text-ink">Human handoff</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            When a caller asks for a person, KONEK transfers them instead of arguing.
+          </p>
+          <div className="mt-6 space-y-5">
+            <Field
+              label="Transfer calls to"
+              hint="Your mobile, or the front desk. Leave empty to keep every call with KONEK."
+            >
+              <Input
+                value={handoff}
+                onChange={(e) => setHandoff(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveHandoff()}
+                placeholder="+639214878257"
+                inputMode="tel"
+              />
+            </Field>
+
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[13px] font-medium text-ink">Allow handoff</div>
+                <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                  Triggers on “can I speak to a person”, “is this a robot”, “makausap ang tao” and the
+                  equivalents in Arabic and Hindi.
+                </p>
+              </div>
+              <Switch
+                checked={business?.handoff_enabled !== false}
+                onCheckedChange={(v) => void setBusinessField({ handoff_enabled: v })}
+                label="Allow handoff"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={saveHandoff} disabled={savingHandoff || handoff === (business?.handoff_number ?? '')}>
+                {savingHandoff ? 'Saving…' : 'Save number'}
+              </Button>
+              {!business?.handoff_number && (
+                <span className="text-[12px] text-muted">
+                  Without a number, KONEK offers a callback instead.
+                </span>
+              )}
             </div>
           </div>
         </section>

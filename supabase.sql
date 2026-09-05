@@ -41,6 +41,8 @@ alter table businesses add column if not exists vibe            text default 'PR
 alter table businesses add column if not exists active_vibe     text default 'PRO_CLOSER';
 alter table businesses add column if not exists language        text default 'EN';   -- EN | TL | TAGLISH | AR | HI
 alter table businesses add column if not exists auto_language   boolean default true; -- mirror the caller's language mid-call
+alter table businesses add column if not exists handoff_number  text;                 -- transfer here when a caller asks for a person
+alter table businesses add column if not exists handoff_enabled boolean default true;
 alter table businesses add column if not exists goal            text default 'Book';
 alter table businesses add column if not exists what_you_sell   text;
 alter table businesses add column if not exists industry        text;

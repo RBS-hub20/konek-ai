@@ -166,7 +166,7 @@ export default function AdminPage() {
               {loadError}
             </div>
           )}
-          {tab === 'overview' && <OverviewTab />}
+          {tab === 'overview' && <OverviewTab onGo={(t) => setTab(t as TabId)} />}
           {tab === 'campaigns' && <CampaignsTab />}
           {tab === 'brain' && <BusinessBrainTab />}
           {tab === 'skills' && <SkillsLibraryTab />}

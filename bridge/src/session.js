@@ -1,9 +1,9 @@
 import WebSocket from 'ws';
 import { config, voiceForVibe, useCartesia } from './config.js';
 import { log } from './log.js';
-import { fetchCallConfig, reportCall } from './konek.js';
+import { fetchCallConfig, reportCall, requestHandoff } from './konek.js';
 import { CartesiaStream } from './cartesia.js';
-import { LanguageTracker } from './detect.js';
+import { LanguageTracker, detectHandoff } from './detect.js';
 
 /* ═══════════════════════════════════════════════════════════════════
    One phone call.
@@ -52,6 +52,7 @@ export class CallSession {
     this.autoLanguage = false;
     this.languagesUsed = new Set();
     this.switching = false;
+    this.handingOff = false;
 
     this.twilio.on('message', (raw) => this.onTwilioMessage(raw));
     this.twilio.on('close', () => this.end('Completed'));
@@ -294,6 +295,9 @@ export class CallSession {
       case 'conversation.item.input_audio_transcription.completed':
         if (evt.transcript) {
           this.addTranscript('Customer', evt.transcript);
+          /* Asking for a person beats everything else, including a language
+             switch — so it is checked first. */
+          if (this.considerHandoff(evt.transcript)) break;
           if (this.autoLanguage) this.considerLanguage(evt.transcript);
         }
         break;
@@ -320,6 +324,51 @@ export class CallSession {
         }
         break;
     }
+  }
+
+  /**
+   * Moves the call to a human when the caller asks for one.
+   *
+   * Only the customer's own words count — Kai saying "I can put you through"
+   * must not transfer the call.
+   *
+   * @returns true when a handoff is under way
+   */
+  considerHandoff(transcript) {
+    if (this.handingOff) return true;
+    const { wants, reason } = detectHandoff(transcript);
+    if (!wants) return false;
+
+    this.handingOff = true;
+    log.info('handoff', `customer asked for a person ("${reason}")`);
+    this.addTranscript('Customer', '[asked for a human]');
+
+    void requestHandoff({
+      callSid: this.callSid,
+      businessId: this.params.businessId || undefined,
+      language: this.language,
+      reason,
+    }).then((res) => {
+      if (res?.transferred) {
+        /* Twilio has taken the call away from us; the sockets close on their
+           own, but end the session so it is reported as a handoff. */
+        this.end('Handed off');
+      } else {
+        /* Nothing configured, or the transfer failed. Let Kai carry on rather
+           than leaving the caller with silence. */
+        this.handingOff = false;
+        log.warn('handoff', `continuing with Kai: ${res?.reason ?? 'unknown'}`);
+        this.sendOpenAI({
+          type: 'response.create',
+          response: {
+            instructions:
+              'The customer asked to speak to a person and no transfer is available. Apologise briefly, say you will have a colleague call them back, take the best number and time, then continue.',
+          },
+        });
+      }
+    });
+
+    return true;
   }
 
   /**

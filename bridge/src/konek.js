@@ -89,3 +89,25 @@ export async function reportCall({
     log.warn('konek', `Could not report call ${callSid}: ${err.message}`);
   }
 }
+
+/** Asks the app to move a live call onto a human. */
+export async function requestHandoff({ callSid, businessId, language, reason }) {
+  try {
+    const res = await fetch(`${config.appUrl}/api/call/handoff`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ twilioSid: callSid, businessId, language, reason }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.warn('handoff', `refused (${res.status}): ${body.error ?? ''}`);
+      return { transferred: false, reason: body.error };
+    }
+    log.info('handoff', body.transferred ? `transferred to ${body.to}` : `not transferred: ${body.reason ?? body.detail}`);
+    return body;
+  } catch (err) {
+    log.warn('handoff', `failed: ${err.message}`);
+    return { transferred: false, reason: err.message };
+  }
+}

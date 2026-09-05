@@ -6,18 +6,21 @@ import { StatCard } from '@/components/ui/StatCard';
 import { Badge } from '@/components/ui/Badge';
 import { Progress } from '@/components/ui/Progress';
 import { useKonekStore } from '@/lib/store';
+import { GettingStarted } from './GettingStarted';
 import { vibeToLabel } from '@/lib/types2';
 
 const statusTone = (s: string) =>
   s === 'Hot Lead' ? 'accent' : s === 'Booked' ? 'success' : s === 'Failed' ? 'danger' : 'default';
 
-export function OverviewTab() {
+export function OverviewTab({ onGo }: { onGo?: (tab: string) => void }) {
   const { stats, recentCalls, runningCampaigns, setup, loadOverview } = useKonekStore();
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
 
   return (
     <div className="space-y-8">
+      {onGo && <GettingStarted onGo={onGo} />}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Calls Today" value={String(stats.callsToday)} delta="Since midnight" icon={<PhoneCall className="h-4 w-4" />} />
         <StatCard

@@ -36,6 +36,9 @@ export interface Business {
   language: string;
   /** Mirror the caller's language mid-call. */
   auto_language: boolean;
+  /** Where to transfer a caller who asks for a person. */
+  handoff_number: string | null;
+  handoff_enabled: boolean;
   settings: BusinessSettings;
   created_at: string;
 }

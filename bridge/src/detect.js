@@ -168,3 +168,47 @@ export class LanguageTracker {
     return { switched: false, to: this.current, explicit: false };
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   "Can I speak to a person?"
+
+   Handing off is the one thing a caller should never have to fight for,
+   so the trigger is generous — but it only fires on the CUSTOMER's turn,
+   never on Kai's own words, or the agent explaining that it can transfer
+   would transfer the call.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const HANDOFF_PATTERNS = [
+  /\b(real|actual|live|human)\s+(person|human|agent|being)\b/i,
+  /\b(speak|talk|chat)\s+(to|with)\s+(a\s+)?(real\s+)?(person|human|someone|agent|manager|supervisor|staff|owner)\b/i,
+  /\b(put me through|transfer me|connect me)\b/i,
+  /\b(get|give)\s+me\s+(a\s+)?(person|human|manager|supervisor)\b/i,
+  /\bis (this|that) (a )?(robot|bot|ai|recording|machine)\b/i,
+  /\b(i want|i need|can i)\s+(to\s+)?(speak|talk)\s+(to|with)\b.*\b(person|human|manager|someone)\b/i,
+  /\bstop\b.*\b(bot|robot|ai)\b/i,
+  /\bnot\b.*\btalking to\b.*\b(robot|bot|ai|machine)\b/i,
+  /\bcustomer service\b/i,
+  /\boperator\b/i,
+  /\bmanager\b/i,
+  /\bsupervisor\b/i,
+  /\btao\b(?!\w)/i,
+  /\b(makausap|kausapin|pakausap)\b/i,
+  /\b(may|meron)\s+bang?\s+(tao|staff|empleyado)\b/i,
+  /\bhindi ako\b.*\brobot\b/i,
+  /(شخص|إنسان|موظف|مدير|خدمة العملاء)/,
+  /(व्यक्ति|इंसान|मैनेजर|प्रतिनिधि)/,
+];
+
+/**
+ * @param {string} text one customer turn
+ * @returns {{wants: boolean, reason: string|null}}
+ */
+export function detectHandoff(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return { wants: false, reason: null };
+  for (const re of HANDOFF_PATTERNS) {
+    const m = t.match(re);
+    if (m) return { wants: true, reason: m[0] };
+  }
+  return { wants: false, reason: null };
+}
