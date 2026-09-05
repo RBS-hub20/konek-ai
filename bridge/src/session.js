@@ -3,7 +3,7 @@ import { config, voiceForVibe, useCartesia } from './config.js';
 import { log } from './log.js';
 import { fetchCallConfig, reportCall, requestHandoff } from './konek.js';
 import { CartesiaStream } from './cartesia.js';
-import { LanguageTracker, detectHandoff } from './detect.js';
+import { LanguageTracker, detectHandoff, detectInterest } from './detect.js';
 
 /* ═══════════════════════════════════════════════════════════════════
    One phone call.
@@ -53,6 +53,8 @@ export class CallSession {
     this.languagesUsed = new Set();
     this.switching = false;
     this.handingOff = false;
+    /* Set from the Twilio parameters when this is KONEK selling itself. */
+    this.outboundSales = false;
 
     this.twilio.on('message', (raw) => this.onTwilioMessage(raw));
     this.twilio.on('close', () => this.end('Completed'));
@@ -128,6 +130,9 @@ export class CallSession {
     this.languagesUsed.add(this.language);
 
     /* The business setting decides; a Twilio parameter can override per call. */
+    this.outboundSales = this.params.outbound === 'sales';
+    if (this.outboundSales) log.info('sales', `outbound lead call: ${this.params.company ?? 'unknown company'}`);
+
     this.autoLanguage = this.params.autoLanguage != null
       ? this.params.autoLanguage === 'true'
       : Boolean(callCfg.autoLanguage);
@@ -298,6 +303,8 @@ export class CallSession {
           /* Asking for a person beats everything else, including a language
              switch — so it is checked first. */
           if (this.considerHandoff(evt.transcript)) break;
+          /* On a sales call, wanting it is reason enough to fetch a human. */
+          if (this.outboundSales && this.considerInterest(evt.transcript)) break;
           if (this.autoLanguage) this.considerLanguage(evt.transcript);
         }
         break;
@@ -357,12 +364,51 @@ export class CallSession {
         /* Nothing configured, or the transfer failed. Let Kai carry on rather
            than leaving the caller with silence. */
         this.handingOff = false;
+    /* Set from the Twilio parameters when this is KONEK selling itself. */
+    this.outboundSales = false;
         log.warn('handoff', `continuing with Kai: ${res?.reason ?? 'unknown'}`);
         this.sendOpenAI({
           type: 'response.create',
           response: {
             instructions:
               'The customer asked to speak to a person and no transfer is available. Apologise briefly, say you will have a colleague call them back, take the best number and time, then continue.',
+          },
+        });
+      }
+    });
+
+    return true;
+  }
+
+  /**
+   * Buying intent on an outbound sales call. The moment someone says yes, a
+   * person should be closing — the AI has done its job.
+   */
+  considerInterest(transcript) {
+    if (this.handingOff) return true;
+    const { interested, reason } = detectInterest(transcript);
+    if (!interested) return false;
+
+    this.handingOff = true;
+    log.info('sales', `interested ("${reason}") — fetching a human`);
+    this.addTranscript('Customer', '[showed buying intent]');
+
+    void requestHandoff({
+      callSid: this.callSid,
+      businessId: this.params.businessId || undefined,
+      language: this.language,
+      reason: `interested: ${reason}`,
+    }).then((res) => {
+      if (res?.transferred) {
+        this.end('Handed off');
+      } else {
+        this.handingOff = false;
+        log.warn('sales', `no human available: ${res?.reason ?? 'unknown'}`);
+        this.sendOpenAI({
+          type: 'response.create',
+          response: {
+            instructions:
+              'They are interested but no one is free to take the call. Say a colleague will call them right back, confirm the best number and time, and thank them warmly.',
           },
         });
       }

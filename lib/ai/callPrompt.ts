@@ -1,4 +1,4 @@
-import type { Business, BusinessBrain, SkillRecord, VibeKey } from '@/lib/types2';
+import type { Business, BusinessBrain, Service, SkillRecord, VibeKey } from '@/lib/types2';
 import { vibeToKey } from '@/lib/types2';
 import { vibeConfig } from './vibes';
 import { languageConfig, languageToKey, openerFor } from './languages';
@@ -16,6 +16,8 @@ export interface CallPromptInput {
   vibe: string;
   /** EN | TL | TAGLISH | AR | HI — defaults to the business setting. */
   language?: string;
+  /** The price list. These are the only prices the agent may quote. */
+  services?: Service[];
   chunks?: { content: string; source_name: string | null }[];
   customerName?: string | null;
 }
@@ -25,7 +27,7 @@ export interface CallPromptInput {
  * ONLY source of facts, so KAI cannot invent prices, hours or policies.
  */
 export function buildCallPrompt({
-  business, brain, skills, vibe, language, chunks = [], customerName,
+  business, brain, skills, vibe, language, services = [], chunks = [], customerName,
 }: CallPromptInput): string {
   const v = vibeConfig(vibe);
   const lang = languageConfig(language ?? business.language);
@@ -64,6 +66,23 @@ export function buildCallPrompt({
   if (brain?.price_range) profile.push(`Price range: ${brain.price_range}. Never quote outside this range.`);
   if (brain?.website_link) profile.push(`Website: ${brain.website_link}`);
   if (profile.length) parts.push(`## ABOUT ${name.toUpperCase()}\n${profile.join('\n')}`);
+
+  /* Written out plainly so the model reads a price rather than paraphrasing
+     one. Anything not on this list, it does not know. */
+  const live = services.filter((s) => s.is_active !== false);
+  if (live.length) {
+    parts.push(
+      '## PRICE LIST — the only prices you may quote\n' +
+        live
+          .map((s) => {
+            const bits = [s.name, s.price ? `— ${s.price}` : null, s.duration ? `(${s.duration})` : null]
+              .filter(Boolean).join(' ');
+            return s.description ? `- ${bits}: ${s.description}` : `- ${bits}`;
+          })
+          .join('\n') +
+        '\n\nIf they ask for something not on this list, say you will check with the team rather than inventing a price.'
+    );
+  }
 
   const goal = brain?.goal ?? 'Book';
   if (GOAL_LINE[goal]) parts.push(`## GOAL\n${GOAL_LINE[goal]}`);

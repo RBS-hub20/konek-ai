@@ -14,6 +14,27 @@ export type CallStatus =
   | 'Initiated' | 'Connected' | 'Hot Lead' | 'Booked'
   | 'Completed' | 'Follow-up' | 'No Answer' | 'Failed';
 
+export const HANDOFF_MODES = ['ai_only', 'if_interested', 'on_request'] as const;
+export type HandoffMode = (typeof HANDOFF_MODES)[number];
+
+export const HANDOFF_MODE_LABELS: Record<HandoffMode, { label: string; detail: string }> = {
+  ai_only: { label: 'AI only', detail: 'Never transfer. KONEK offers a callback instead.' },
+  if_interested: { label: 'Transfer when interested', detail: 'Hand over as soon as the customer shows buying intent, and whenever they ask.' },
+  on_request: { label: 'Transfer on request', detail: 'Only when the customer asks for a person.' },
+};
+
+export interface Service {
+  id: string;
+  business_id: string;
+  name: string;
+  price: string | null;
+  description: string | null;
+  duration: string | null;
+  category: string | null;
+  is_active: boolean;
+  sort_order: number;
+}
+
 export interface BusinessSettings {
   whatsapp_followup?: boolean;
   sms_fallback?: boolean;
@@ -38,7 +59,17 @@ export interface Business {
   auto_language: boolean;
   /** Where to transfer a caller who asks for a person. */
   handoff_number: string | null;
+  handoff_backup: string | null;
   handoff_enabled: boolean;
+  handoff_mode: HandoffMode;
+  industry: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  hours: string | null;
+  logo_url: string | null;
+  /** Null until the onboarding wizard is finished. */
+  onboarded_at: string | null;
   settings: BusinessSettings;
   created_at: string;
 }
@@ -98,6 +129,8 @@ export interface CallLog {
   vibe: string | null;
   /** The language actually spoken by the end of the call. */
   language: string | null;
+  transferred_to: string | null;
+  transfer_status: string | null;
   duration_seconds: number;
   status: CallStatus | string;
   recording_url: string | null;
@@ -132,4 +165,33 @@ export interface OverviewStats {
   connectedPct: number;
   hotLeads: number;
   bookings: number;
+}
+
+/* ── Outbound sales ─────────────────────────────────────────────── */
+
+export const LEAD_STATUSES = [
+  'New', 'Calling', 'Interested', 'Transferred', 'Not interested', 'No answer', 'Closed',
+] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+export interface Lead {
+  id: string;
+  company: string | null;
+  contact_person: string | null;
+  name: string | null;
+  phone: string;
+  industry: string | null;
+  country: string | null;
+  status: string;
+  notes: string | null;
+  call_count: number;
+  last_called_at: string | null;
+  twilio_sid: string | null;
+  created_at: string;
+}
+
+export interface SalesSettings {
+  manager_number: string | null;
+  backup_number: string | null;
+  whisper: boolean;
 }

@@ -2,7 +2,8 @@ import { db, hasSupabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
 import type {
   Business, BusinessBrain, CallLog, Campaign, Contact,
-  Integration, KnowledgeFile, OverviewStats, SkillRecord, VibeKey,
+  Integration, KnowledgeFile, Lead, OverviewStats, SalesSettings, Service,
+  SkillRecord, VibeKey,
 } from '@/lib/types2';
 import { vibeToKey } from '@/lib/types2';
 import { SEED_SKILLS } from './seed';
@@ -22,6 +23,9 @@ const uuid = () =>
 const nowIso = () => new Date().toISOString();
 
 interface Mem {
+  services: Service[];
+  leads: Lead[];
+  platform: Record<string, Record<string, unknown>>;
   businesses: Business[];
   brains: BusinessBrain[];
   campaigns: Campaign[];
@@ -47,7 +51,16 @@ function mem(): Mem {
         language: 'EN',
         auto_language: true,
         handoff_number: null,
+        handoff_backup: null,
         handoff_enabled: true,
+        handoff_mode: 'on_request',
+        industry: null,
+        address: null,
+        city: null,
+        country: null,
+        hours: null,
+        logo_url: null,
+        onboarded_at: null,
         settings: { whatsapp_followup: true, sms_fallback: true },
         created_at: nowIso(),
       }],
@@ -57,7 +70,8 @@ function mem(): Mem {
         price_range: '₱2,500 – ₱12,800', goal: 'Book',
         knowledge_files: [], website_link: null, updated_at: nowIso(),
       }],
-      campaigns: [], contacts: [], callLogs: [],
+      campaigns: [], contacts: [], callLogs: [], services: [], leads: [],
+      platform: { sales: { manager_number: null, backup_number: null, whisper: true } },
       skills: SEED_SKILLS.map((s) => ({
         id: s.id, name: s.name, description: s.description,
         category: (s.category ?? '').toUpperCase(), vibe: vibeToKey(s.vibe ?? ''),
@@ -89,7 +103,16 @@ const normalizeBusiness = (b: Record<string, unknown>): Business => ({
   language: (b.language as string) ?? 'EN',
   auto_language: b.auto_language !== false,
   handoff_number: (b.handoff_number as string) ?? null,
+  handoff_backup: (b.handoff_backup as string) ?? null,
   handoff_enabled: b.handoff_enabled !== false,
+  handoff_mode: ((b.handoff_mode as Business['handoff_mode']) ?? 'on_request'),
+  industry: (b.industry as string) ?? null,
+  address: (b.address as string) ?? null,
+  city: (b.city as string) ?? null,
+  country: (b.country as string) ?? null,
+  hours: (b.hours as string) ?? null,
+  logo_url: (b.logo_url as string) ?? null,
+  onboarded_at: (b.onboarded_at as string) ?? null,
   settings: (b.settings as Business['settings']) ?? {},
   created_at: (b.created_at as string) ?? nowIso(),
 });
@@ -118,7 +141,10 @@ export async function getBusiness(id?: string | null): Promise<Business | null> 
 export async function updateBusiness(id: string, patch: Partial<Business>): Promise<Business> {
   const allowed = [
     'name', 'slug', 'owner_email', 'owner_name', 'outbound_number', 'plan',
-    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language', 'handoff_number', 'handoff_enabled', 'settings',
+    'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language',
+    'handoff_number', 'handoff_backup', 'handoff_enabled', 'handoff_mode',
+    'industry', 'address', 'city', 'country', 'hours', 'logo_url', 'onboarded_at',
+    'settings',
   ] as const;
   const clean: Record<string, unknown> = {};
   for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
@@ -151,7 +177,16 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     language: input.language ?? 'EN',
     auto_language: input.auto_language ?? true,
     handoff_number: input.handoff_number ?? null,
+    handoff_backup: input.handoff_backup ?? null,
     handoff_enabled: input.handoff_enabled ?? true,
+    handoff_mode: input.handoff_mode ?? 'on_request',
+    industry: input.industry ?? null,
+    address: input.address ?? null,
+    city: input.city ?? null,
+    country: input.country ?? null,
+    hours: input.hours ?? null,
+    logo_url: input.logo_url ?? null,
+    onboarded_at: input.onboarded_at ?? null,
     settings: input.settings ?? { whatsapp_followup: true, sms_fallback: true },
   };
   if (!hasSupabase) {
@@ -497,6 +532,8 @@ const normalizeCall = (r: Record<string, unknown>): CallLog => ({
   skills_used: Array.isArray(r.skills_used) ? (r.skills_used as string[]) : [],
   vibe: (r.vibe as string) ?? null,
   language: (r.language as string) ?? null,
+  transferred_to: (r.transferred_to as string) ?? null,
+  transfer_status: (r.transfer_status as string) ?? null,
   duration_seconds: Number(r.duration_seconds ?? 0),
   status: (r.status as string) ?? 'Initiated',
   recording_url: (r.recording_url as string) ?? null,
@@ -527,6 +564,8 @@ export async function createCallLog(input: Partial<CallLog>): Promise<CallLog> {
     skills_used: input.skills_used ?? [],
     vibe: input.vibe ?? null,
     language: input.language ?? null,
+    transferred_to: input.transferred_to ?? null,
+    transfer_status: input.transfer_status ?? null,
     duration_seconds: input.duration_seconds ?? 0,
     status: input.status ?? 'Initiated',
     recording_url: input.recording_url ?? null,
@@ -589,6 +628,92 @@ export async function overviewStats(businessId: string): Promise<OverviewStats> 
     hotLeads: today.filter((c) => c.status === 'Hot Lead').length,
     bookings: today.filter((c) => c.status === 'Booked').length,
   };
+}
+
+/* ── Services / menu ─────────────────────────────────────────────── */
+
+const normalizeService = (r: Record<string, unknown>): Service => ({
+  id: String(r.id),
+  business_id: String(r.business_id),
+  name: String(r.name ?? ''),
+  price: (r.price as string) ?? null,
+  description: (r.description as string) ?? null,
+  duration: (r.duration as string) ?? null,
+  category: (r.category as string) ?? null,
+  is_active: r.is_active !== false,
+  sort_order: Number(r.sort_order ?? 0),
+});
+
+export async function listServices(businessId: string): Promise<Service[]> {
+  if (!hasSupabase) {
+    return mem().services.filter((s) => s.business_id === businessId)
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }
+  const { data, error } = await db().from('services').select('*')
+    .eq('business_id', businessId).order('sort_order');
+  if (error) throw error;
+  return (data ?? []).map(normalizeService);
+}
+
+export async function createService(businessId: string, input: Partial<Service>): Promise<Service> {
+  const existing = await safe(() => listServices(businessId), []);
+  const row = {
+    business_id: businessId,
+    name: input.name ?? 'Untitled',
+    price: input.price ?? null,
+    description: input.description ?? null,
+    duration: input.duration ?? null,
+    category: input.category ?? null,
+    is_active: input.is_active ?? true,
+    sort_order: input.sort_order ?? existing.length,
+  };
+  if (!hasSupabase) {
+    const created = normalizeService({ ...row, id: uuid() });
+    mem().services.push(created);
+    return created;
+  }
+  const { data, error } = await db().from('services').insert(row).select().single();
+  if (error) throw error;
+  return normalizeService(data);
+}
+
+export async function updateService(id: string, patch: Partial<Service>): Promise<Service | null> {
+  const allowed = ['name', 'price', 'description', 'duration', 'category', 'is_active', 'sort_order'] as const;
+  const clean: Record<string, unknown> = {};
+  for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
+
+  if (!hasSupabase) {
+    const m = mem();
+    const i = m.services.findIndex((s) => s.id === id);
+    if (i === -1) return null;
+    m.services[i] = { ...m.services[i], ...(clean as Partial<Service>) };
+    return m.services[i];
+  }
+  const { data, error } = await db().from('services').update(clean).eq('id', id).select().maybeSingle();
+  if (error) throw error;
+  return data ? normalizeService(data) : null;
+}
+
+export async function deleteService(id: string): Promise<void> {
+  if (!hasSupabase) {
+    const m = mem();
+    m.services = m.services.filter((s) => s.id !== id);
+    return;
+  }
+  const { error } = await db().from('services').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** Bulk insert, used by the onboarding wizard. */
+export async function replaceServices(businessId: string, rows: Partial<Service>[]): Promise<Service[]> {
+  const current = await safe(() => listServices(businessId), []);
+  for (const c of current) await safe(() => deleteService(c.id), undefined);
+  const created: Service[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    created.push(await createService(businessId, { ...r, sort_order: i }));
+  }
+  return created;
 }
 
 /* ── Integrations ────────────────────────────────────────────────── */
@@ -673,7 +798,16 @@ function fallbackBusiness(): Business {
     language: 'EN',
     auto_language: true,
     handoff_number: null,
+    handoff_backup: null,
     handoff_enabled: true,
+    handoff_mode: 'on_request',
+    industry: null,
+    address: null,
+    city: null,
+    country: null,
+    hours: null,
+    logo_url: null,
+    onboarded_at: null,
     settings: { whatsapp_followup: true, sms_fallback: true },
     created_at: nowIso(),
   };
@@ -873,4 +1007,117 @@ export async function logCall(row: {
         ? (error.message ?? 'Insert failed')
         : null,
   };
+}
+
+/* ── Outbound sales leads ────────────────────────────────────────── */
+
+const normalizeLead = (r: Record<string, unknown>): Lead => ({
+  id: String(r.id),
+  company: (r.company as string) ?? null,
+  contact_person: (r.contact_person as string) ?? null,
+  name: (r.name as string) ?? null,
+  phone: String(r.phone ?? ''),
+  industry: (r.industry as string) ?? null,
+  country: (r.country as string) ?? null,
+  status: (r.status as string) ?? 'New',
+  notes: (r.notes as string) ?? null,
+  call_count: Number(r.call_count ?? 0),
+  last_called_at: (r.last_called_at as string) ?? null,
+  twilio_sid: (r.twilio_sid as string) ?? null,
+  created_at: (r.created_at as string) ?? nowIso(),
+});
+
+export async function listLeads(limit = 200): Promise<Lead[]> {
+  if (!hasSupabase) return mem().leads.slice(0, limit);
+  const { data, error } = await db().from('leads').select('*')
+    .order('created_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(normalizeLead);
+}
+
+export async function getLead(id: string): Promise<Lead | null> {
+  if (!hasSupabase) return mem().leads.find((l) => l.id === id) ?? null;
+  const { data, error } = await db().from('leads').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data ? normalizeLead(data) : null;
+}
+
+export async function createLead(input: Partial<Lead>): Promise<Lead> {
+  const row = {
+    company: input.company ?? null,
+    contact_person: input.contact_person ?? null,
+    name: input.contact_person ?? input.name ?? null,
+    phone: input.phone ?? '',
+    industry: input.industry ?? null,
+    country: input.country ?? null,
+    status: input.status ?? 'New',
+    notes: input.notes ?? null,
+    call_count: 0,
+  };
+  if (!hasSupabase) {
+    const created = normalizeLead({ ...row, id: uuid(), created_at: nowIso() });
+    mem().leads.unshift(created);
+    return created;
+  }
+  const { data, error } = await db().from('leads').insert(row).select().single();
+  if (error) throw error;
+  return normalizeLead(data);
+}
+
+export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
+  const allowed = ['company', 'contact_person', 'name', 'phone', 'industry', 'country',
+    'status', 'notes', 'call_count', 'last_called_at', 'twilio_sid'] as const;
+  const clean: Record<string, unknown> = {};
+  for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
+
+  if (!hasSupabase) {
+    const m = mem();
+    const i = m.leads.findIndex((l) => l.id === id);
+    if (i === -1) return null;
+    m.leads[i] = { ...m.leads[i], ...(clean as Partial<Lead>) };
+    return m.leads[i];
+  }
+  const { data, error } = await db().from('leads').update(clean).eq('id', id).select().maybeSingle();
+  if (error) throw error;
+  return data ? normalizeLead(data) : null;
+}
+
+export async function deleteLead(id: string): Promise<void> {
+  if (!hasSupabase) {
+    const m = mem();
+    m.leads = m.leads.filter((l) => l.id !== id);
+    return;
+  }
+  const { error } = await db().from('leads').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function findLeadByTwilioSid(sid: string): Promise<Lead | null> {
+  if (!hasSupabase) return mem().leads.find((l) => l.twilio_sid === sid) ?? null;
+  const { data, error } = await db().from('leads').select('*').eq('twilio_sid', sid).maybeSingle();
+  if (error) throw error;
+  return data ? normalizeLead(data) : null;
+}
+
+/* ── Platform settings ───────────────────────────────────────────── */
+
+const DEFAULT_SALES: SalesSettings = { manager_number: null, backup_number: null, whisper: true };
+
+export async function getSalesSettings(): Promise<SalesSettings> {
+  if (!hasSupabase) return { ...DEFAULT_SALES, ...(mem().platform.sales as Partial<SalesSettings>) };
+  const { data, error } = await db().from('platform_settings').select('value').eq('key', 'sales').maybeSingle();
+  if (error) throw error;
+  return { ...DEFAULT_SALES, ...((data?.value as Partial<SalesSettings>) ?? {}) };
+}
+
+export async function saveSalesSettings(patch: Partial<SalesSettings>): Promise<SalesSettings> {
+  const merged = { ...(await getSalesSettings()), ...patch };
+  if (!hasSupabase) {
+    mem().platform.sales = merged as unknown as Record<string, unknown>;
+    return merged;
+  }
+  const { error } = await db().from('platform_settings')
+    .upsert({ key: 'sales', value: merged, updated_at: nowIso() }, { onConflict: 'key' });
+  if (error) throw error;
+  return merged;
 }

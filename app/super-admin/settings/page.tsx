@@ -1,9 +1,13 @@
 'use client';
 
-import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Check, PhoneForwarded, RefreshCw } from 'lucide-react';
+import { Field, Input } from '@/components/ui/Input';
+import { Switch } from '@/components/ui/Switch';
+import { tryApi } from '@/lib/apiClient';
+import type { SalesSettings } from '@/lib/types2';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/apiClient';
 import { useSuperAdmin } from '@/components/super-admin/SuperAdminData';
 
@@ -12,6 +16,37 @@ export default function SchemaHealthPage() {
   const { schema, services, loading, reload } = useSuperAdmin();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  /* Where an interested lead is transferred. Platform-wide: these calls are
+     KONEK selling itself, not a tenant calling its own customers. */
+  const [sales, setSales] = useState<SalesSettings>({ manager_number: null, backup_number: null, whisper: true });
+  const [manager, setManager] = useState('');
+  const [backup, setBackup] = useState('');
+  const [savingSales, setSavingSales] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await tryApi(() => api.salesSettings());
+      if (res) {
+        setSales(res.sales);
+        setManager(res.sales.manager_number ?? '');
+        setBackup(res.sales.backup_number ?? '');
+      }
+    })();
+  }, []);
+
+  const saveSales = async (patch: Partial<SalesSettings>) => {
+    setSavingSales(true); setNotice(null);
+    try {
+      const res = await api.saveSalesSettings(patch);
+      setSales(res.sales);
+      setNotice('Sales numbers saved.');
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not save');
+    } finally {
+      setSavingSales(false);
+    }
+  };
 
   /* A migrated column can read as absent until PostgREST catches up, which
      looks identical to never having run the migration. */
@@ -155,6 +190,67 @@ export default function SchemaHealthPage() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Sales numbers */}
+      <section className="rounded-brand border border-line bg-paper p-5">
+        <div className="flex items-center gap-2.5">
+          <PhoneForwarded className="h-4 w-4 text-ink" />
+          <h2 className="font-display text-[14px] font-semibold text-ink">Sales numbers</h2>
+        </div>
+        <p className="mt-1 text-[12px] leading-relaxed text-muted">
+          Where Cindy sends a lead that shows interest. Both numbers ring together, so whoever picks up
+          first takes the call.
+        </p>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label="Sales manager" hint="Your number. Rings first.">
+            <Input
+              value={manager}
+              onChange={(e) => setManager(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void saveSales({ manager_number: manager })}
+              placeholder="+971501184402"
+              inputMode="tel"
+            />
+          </Field>
+          <Field label="Backup" hint="Optional. Rings at the same time.">
+            <Input
+              value={backup}
+              onChange={(e) => setBackup(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void saveSales({ backup_number: backup })}
+              placeholder="+639214878257"
+              inputMode="tel"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-5 flex items-start justify-between gap-4 border-t border-line pt-5">
+          <div>
+            <div className="text-[13px] font-medium text-ink">Whisper before connecting</div>
+            <p className="mt-1 text-[12px] leading-relaxed text-muted">
+              The person answering hears “KONEK AI transfer. Bubbles Laundry. Philippines. They are
+              interested” before the customer is bridged in. The customer never hears it.
+            </p>
+          </div>
+          <Switch
+            checked={sales.whisper !== false}
+            onCheckedChange={(v) => void saveSales({ whisper: v })}
+            label="Whisper before connecting"
+          />
+        </div>
+
+        <div className="mt-5 flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={savingSales || (manager === (sales.manager_number ?? '') && backup === (sales.backup_number ?? ''))}
+            onClick={() => void saveSales({ manager_number: manager, backup_number: backup })}
+          >
+            {savingSales ? 'Saving…' : 'Save numbers'}
+          </Button>
+          {!sales.manager_number && (
+            <span className="text-[12px] text-muted">Without this, an interested lead has nowhere to go.</span>
+          )}
         </div>
       </section>
 

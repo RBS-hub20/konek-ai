@@ -212,3 +212,44 @@ export function detectHandoff(text) {
   }
   return { wants: false, reason: null };
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Buying intent.
+
+   Used only on outbound sales calls, and only when the handoff mode is
+   "if_interested": the moment someone signals they want it, a human
+   should be closing rather than an AI continuing to pitch.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const INTEREST_PATTERNS = [
+  /\b(i'?m|we'?re|i am|we are)\s+(very\s+|really\s+|quite\s+)?interested\b/i,
+  /\b(sounds|looks)\s+(good|great|interesting|promising)\b/i,
+  /\b(yes|yeah|sure|okay)\b.*\b(interested|let'?s do it|sign (me )?up|go ahead)\b/i,
+  /\b(let'?s do it|sign me up|i want (this|it)|we want (this|it)|count me in)\b/i,
+  /\b(send|email)\s+(me\s+)?(the\s+)?(details|info|information|proposal|quote|pricing)\b/i,
+  /\b(book|schedule|set up)\s+(a\s+)?(demo|meeting|call)\b/i,
+  /\bhow (much|do i|can i|would i)\b.*\b(cost|pay|start|sign up|get started)\b/i,
+  /\b(how do we|how can we|what'?s the next step|next steps)\b/i,
+  /\b(when can (you|we)|can we start)\b/i,
+  /\b(interesado|gusto ko|pwede ba natin|sige game)\b/i,
+  /\b(magkano|paano mag-?sign up|paano po yan)\b/i,
+  /(مهتم|أريد|كم السعر|كيف نبدأ)/,
+];
+
+/**
+ * @param {string} text one customer turn
+ * @returns {{interested: boolean, reason: string|null}}
+ */
+export function detectInterest(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return { interested: false, reason: null };
+  /* A flat no should never read as interest just because it contains "yes". */
+  if (/\b(not interested|no thanks|no thank you|stop calling|remove me|hindi ako interesado)\b/i.test(t)) {
+    return { interested: false, reason: null };
+  }
+  for (const re of INTEREST_PATTERNS) {
+    const m = t.match(re);
+    if (m) return { interested: true, reason: m[0] };
+  }
+  return { interested: false, reason: null };
+}

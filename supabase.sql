@@ -42,7 +42,17 @@ alter table businesses add column if not exists active_vibe     text default 'PR
 alter table businesses add column if not exists language        text default 'EN';   -- EN | TL | TAGLISH | AR | HI
 alter table businesses add column if not exists auto_language   boolean default true; -- mirror the caller's language mid-call
 alter table businesses add column if not exists handoff_number  text;                 -- transfer here when a caller asks for a person
+alter table businesses add column if not exists handoff_backup  text;                 -- tried if the first does not answer
 alter table businesses add column if not exists handoff_enabled boolean default true;
+alter table businesses add column if not exists handoff_mode    text default 'on_request';
+  -- ai_only | if_interested | on_request
+alter table businesses add column if not exists industry        text;
+alter table businesses add column if not exists address         text;
+alter table businesses add column if not exists city            text;
+alter table businesses add column if not exists country         text;
+alter table businesses add column if not exists hours           text;
+alter table businesses add column if not exists logo_url        text;
+alter table businesses add column if not exists onboarded_at    timestamptz;          -- null = wizard not finished
 alter table businesses add column if not exists goal            text default 'Book';
 alter table businesses add column if not exists what_you_sell   text;
 alter table businesses add column if not exists industry        text;
@@ -114,6 +124,8 @@ alter table contacts add column if not exists name          text;
 alter table contacts add column if not exists status        text default 'Pending';
 alter table contacts add column if not exists custom_fields jsonb default '{}'::jsonb;
 
+-- Outbound sales leads. Not a tenant's customers — these are companies KONEK
+-- itself is selling to, worked from the super admin console.
 create table if not exists leads (
   id uuid primary key default gen_random_uuid(),
   business_id uuid,
@@ -125,6 +137,45 @@ create table if not exists leads (
   notes text,
   created_at timestamptz default now()
 );
+alter table leads add column if not exists company        text;
+alter table leads add column if not exists contact_person text;
+alter table leads add column if not exists industry       text;
+alter table leads add column if not exists country        text;
+alter table leads add column if not exists last_called_at timestamptz;
+alter table leads add column if not exists call_count     int default 0;
+alter table leads add column if not exists twilio_sid     text;
+
+create index if not exists leads_status_idx on leads (status, created_at desc);
+
+-- Platform-wide configuration for the super admin console, including the
+-- sales numbers an interested lead is transferred to.
+create table if not exists platform_settings (
+  key text primary key,
+  value jsonb default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+
+insert into platform_settings (key, value)
+values ('sales', '{"manager_number": null, "backup_number": null, "whisper": true}'::jsonb)
+on conflict (key) do nothing;
+
+-- ── 5b · Services / menu / price list ───────────────────────────────
+-- One row per thing the business sells. The agent quotes from these, so a
+-- price change here changes what it says on the next call.
+create table if not exists services (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid,
+  name text,
+  created_at timestamptz default now()
+);
+alter table services add column if not exists price       text;
+alter table services add column if not exists description text;
+alter table services add column if not exists duration    text;
+alter table services add column if not exists category    text;
+alter table services add column if not exists is_active   boolean default true;
+alter table services add column if not exists sort_order  int default 0;
+
+create index if not exists services_business_idx on services (business_id, sort_order);
 
 -- ── 6 · Call logs ───────────────────────────────────────────────────
 create table if not exists call_logs (
@@ -152,6 +203,8 @@ alter table call_logs add column if not exists duration_seconds int default 0;
 alter table call_logs add column if not exists cost_cents       int default 0;
 alter table call_logs add column if not exists skills_used      text[] default '{}';
 alter table call_logs add column if not exists twilio_sid       text;
+alter table call_logs add column if not exists transferred_to   text;
+alter table call_logs add column if not exists transfer_status  text;   -- requested | connected | no_answer | failed
 
 create unique index if not exists call_logs_twilio_sid_key on call_logs (twilio_sid) where twilio_sid is not null;
 
@@ -282,7 +335,8 @@ declare t text;
 begin
   foreach t in array array[
     'businesses','business_brain','brain_chunks','campaigns','contacts','leads',
-    'call_logs','skills','business_skills','business_integrations'
+    'call_logs','skills','business_skills','business_integrations','services',
+    'platform_settings'
   ] loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists "Allow all" on %I', t);

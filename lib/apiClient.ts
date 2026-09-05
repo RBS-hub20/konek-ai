@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  Lead, SalesSettings, Service,
   Business, BusinessBrain, CallLog, Campaign, Contact,
   KnowledgeFile, OverviewStats, SkillRecord,
 } from './types2';
@@ -63,6 +64,27 @@ export const api = {
       body: JSON.stringify({ confirm: true }),
     }),
   dbHealth: () => req<Record<string, unknown>>('/api/db/health'),
+
+  /* Outbound sales */
+  leads: () => req<{ leads: Lead[]; stats: Record<string, number> }>('/api/leads'),
+  addLead: (input: Partial<Lead>) =>
+    req<{ leads: Lead[]; created: number }>('/api/leads', { method: 'POST', body: JSON.stringify(input) }),
+  updateLead: (id: string, patch: Partial<Lead>) =>
+    req<{ lead: Lead }>('/api/leads', { method: 'PATCH', body: JSON.stringify({ id, ...patch }) }),
+  deleteLead: (id: string) => req<{ deleted: string }>(`/api/leads?id=${id}`, { method: 'DELETE' }),
+  callLead: (leadId: string) =>
+    req<{ success: boolean; twilioSid: string | null; to: string; language: string; warning?: string }>(
+      '/api/leads/call', { method: 'POST', body: JSON.stringify({ leadId }) }
+    ),
+  salesSettings: () => req<{ sales: SalesSettings }>('/api/platform/sales'),
+  saveSalesSettings: (patch: Partial<SalesSettings>) =>
+    req<{ sales: SalesSettings }>('/api/platform/sales', { method: 'POST', body: JSON.stringify(patch) }),
+
+  /* Services */
+  services: (businessId?: string) =>
+    req<{ services: Service[] }>(`/api/services${businessId ? `?businessId=${businessId}` : ''}`),
+  saveServices: (services: Partial<Service>[], businessId?: string) =>
+    req<{ services: Service[] }>('/api/services', { method: 'POST', body: JSON.stringify({ services, businessId }) }),
   dbReload: () => req<{ reloaded: boolean; note: string }>('/api/db/reload', { method: 'POST' }),
 
   createBusiness: (input: Partial<Business>) =>
