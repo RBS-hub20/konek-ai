@@ -158,9 +158,9 @@ export class CallSession {
       const wantAudio = !this.tts;
       const vad = {
         type: 'server_vad',
-        threshold: 0.5,
-        prefix_padding_ms: 300,
-        silence_duration_ms: 600,
+        threshold: config.vadThreshold,
+        prefix_padding_ms: config.vadPrefixMs,
+        silence_duration_ms: config.vadSilenceMs,
       };
 
       this.sendOpenAI(
@@ -190,6 +190,9 @@ export class CallSession {
                     format: { type: 'audio/pcmu' },
                     turn_detection: vad,
                     transcription: { model: 'whisper-1' },
+                    ...(config.noiseReduction
+                      ? { noise_reduction: { type: config.noiseReduction } }
+                      : {}),
                   },
                   ...(wantAudio
                     ? { output: { format: { type: 'audio/pcmu' }, voice: voiceForVibe(callCfg.voiceStyle) } }

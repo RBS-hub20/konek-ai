@@ -56,6 +56,16 @@ export const config = {
     hi: read('CARTESIA_MODEL_HI', 'sonic-3'),
   },
 
+  /* Turn detection. Phone lines carry traffic, TV and other voices, so the
+     threshold sits above a conversational default and the silence window is
+     long enough that a thinking pause is not treated as the end of a turn. */
+  vadThreshold: Number(read('VAD_THRESHOLD', '0.65')),
+  vadSilenceMs: Number(read('VAD_SILENCE_MS', '800')),
+  vadPrefixMs: Number(read('VAD_PREFIX_MS', '300')),
+  /* 'near_field' suits a handset held to the ear; 'far_field' a speakerphone.
+     Empty disables it. */
+  noiseReduction: read('NOISE_REDUCTION', 'near_field'),
+
   /* Hard stop so a stuck call can never bill forever. */
   maxCallSeconds: Number(read('MAX_CALL_SECONDS', '600')),
 

@@ -17,14 +17,37 @@ export async function GET(req: Request) {
     /* Either table may not exist yet; the console should still render. */
     const businesses = await safe(() => listBusinesses(), []);
     const allCalls = await safe(() => listCallLogs(null, 500), []);
+
+    /* Totals are computed over distinct tenants. Two rows for the same
+       business would otherwise double the MRR, which is how $49 read as $98. */
+    const seen = new Set<string>();
+    const distinct = businesses.filter((b) => {
+      const key = (b.owner_email?.trim().toLowerCase())
+        || `${b.name.trim().toLowerCase()}|${(b.outbound_number ?? '').replace(/\D/g, '')}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const duplicates = businesses.length - distinct.length;
+
+    /* A call that never connected has no duration and should not inflate the
+       "calls handled" figure. */
+    const connected = allCalls.filter(
+      (c) => !['Failed', 'No Answer', 'Initiated'].includes(String(c.status))
+    );
+
     return {
       businesses,
+      duplicates,
       stats: {
-        mrr: businesses.reduce((s, b) => s + (b.mrr ?? 0), 0),
-        active: businesses.filter((b) => b.status === 'active').length,
-        total: businesses.length,
-        callsUsed: businesses.reduce((s, b) => s + (b.calls_used ?? 0), 0),
+        mrr: distinct.reduce((s, b) => s + (b.mrr ?? 0), 0),
+        active: distinct.filter((b) => b.status === 'active').length,
+        total: distinct.length,
+        totalRows: businesses.length,
+        callsUsed: distinct.reduce((s, b) => s + (b.calls_used ?? 0), 0),
         totalCalls: allCalls.length,
+        connectedCalls: connected.length,
+        answeredSeconds: allCalls.reduce((s, c) => s + (c.duration_seconds ?? 0), 0),
         hotLeads: allCalls.filter((c) => c.status === 'Hot Lead').length,
       },
       recentCalls: allCalls.slice(0, 20),

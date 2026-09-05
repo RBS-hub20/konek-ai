@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity, Building2, DollarSign, ExternalLink, Flame, Loader2,
-  Pause, PhoneCall, Play, Plus, X,
+  Pause, PhoneCall, Play, Plus, Search, Trash2, X,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
@@ -17,7 +17,7 @@ import { Field, Input, Select } from '@/components/ui/Input';
 import { api, tryApi } from '@/lib/apiClient';
 import type { Business, CallLog } from '@/lib/types2';
 import { vibeToLabel } from '@/lib/types2';
-import { cn, formatCurrency, formatNumber } from '@/lib/utils';
+import { cn, formatCurrency, formatDuration, formatNumber } from '@/lib/utils';
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -27,7 +27,11 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
-interface Stats { mrr: number; active: number; total: number; callsUsed: number; totalCalls: number; hotLeads: number }
+interface Stats {
+  mrr: number; active: number; total: number; totalRows?: number;
+  callsUsed: number; totalCalls: number; connectedCalls?: number;
+  answeredSeconds?: number; hotLeads: number;
+}
 
 export default function SuperAdminPage() {
   const [tab, setTab] = useState<TabId>('overview');
@@ -37,6 +41,7 @@ export default function SuperAdminPage() {
   const [loading, setLoading] = useState(true);
   const [services, setServices] = useState<Record<string, boolean>>({});
   const [showNew, setShowNew] = useState(false);
+  const [duplicates, setDuplicates] = useState(0);
 
   const load = useCallback(async () => {
     const [res, status] = await Promise.all([
@@ -47,6 +52,7 @@ export default function SuperAdminPage() {
       setBusinesses(res.businesses);
       setStats(res.stats);
       setRecent(res.recentCalls);
+      setDuplicates((res as { duplicates?: number }).duplicates ?? 0);
     }
     if (status) setServices((status.services as Record<string, boolean>) ?? {});
     setLoading(false);
@@ -112,13 +118,28 @@ export default function SuperAdminPage() {
               <div className="space-y-8">
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   <StatCard label="Total MRR" value={formatCurrency(stats.mrr)} delta={`${stats.total} tenants`} icon={<DollarSign className="h-4 w-4" />} />
-                  <StatCard label="Active Businesses" value={String(stats.active)} delta={`${stats.total} total`} icon={<Building2 className="h-4 w-4" />} />
-                  <StatCard label="Total Calls" value={formatNumber(stats.totalCalls)} delta="Across all businesses" icon={<PhoneCall className="h-4 w-4" />} />
+                  <StatCard
+                    label="Active Businesses"
+                    value={String(stats.active)}
+                    delta={duplicates ? `${stats.total} distinct · ${duplicates} duplicate row${duplicates === 1 ? '' : 's'}` : `${stats.total} total`}
+                    icon={<Building2 className="h-4 w-4" />}
+                  />
+                  <StatCard
+                    label="Total Calls"
+                    value={formatNumber(stats.connectedCalls ?? stats.totalCalls)}
+                    delta={`${formatNumber(stats.totalCalls)} placed · ${formatDuration(stats.answeredSeconds ?? 0)} talk time`}
+                    icon={<PhoneCall className="h-4 w-4" />}
+                  />
                   <StatCard label="Hot Leads" value={formatNumber(stats.hotLeads)} delta="All time" accent icon={<Flame className="h-4 w-4" />} />
                 </div>
 
                 <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                  <TenantsTable businesses={businesses} onChanged={load} onNew={() => setShowNew(true)} />
+                  <TenantsTable
+                    businesses={businesses}
+                    duplicates={duplicates}
+                    onChanged={load}
+                    onNew={() => setShowNew(true)}
+                  />
                   <LiveFeed calls={recent} />
                 </div>
               </div>
@@ -138,10 +159,51 @@ export default function SuperAdminPage() {
 
 /* ── Tenants ─────────────────────────────────────────────────────── */
 
-function TenantsTable({ businesses, onChanged, onNew }: {
-  businesses: Business[]; onChanged: () => void; onNew: () => void;
+function TenantsTable({ businesses, duplicates, onChanged, onNew }: {
+  businesses: Business[]; duplicates: number; onChanged: () => void; onNew: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [deduping, setDeduping] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const filtered = businesses.filter((b) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [b.name, b.owner_email, b.outbound_number, b.plan, b.status]
+      .some((f) => String(f ?? '').toLowerCase().includes(q));
+  });
+
+  /* Which rows would be removed, so the duplicates are visible in the table
+     rather than only in a total that looks wrong. */
+  const duplicateIds = new Set<string>();
+  const seen = new Map<string, Business>();
+  for (const b of [...businesses].sort((a, c) => a.created_at.localeCompare(c.created_at) || a.id.localeCompare(c.id))) {
+    const key = (b.owner_email?.trim().toLowerCase())
+      || `${b.name.trim().toLowerCase()}|${(b.outbound_number ?? '').replace(/\D/g, '')}`;
+    if (seen.has(key)) duplicateIds.add(b.id);
+    else seen.set(key, b);
+  }
+
+  const dedupe = async () => {
+    const preview = await tryApi(() => api.dedupePreview());
+    if (!preview?.wouldRemove) { setNotice('No duplicates to remove.'); return; }
+    if (!window.confirm(
+      `Permanently delete ${preview.wouldRemove} duplicate tenant row(s)?\n\n` +
+      `Call logs, campaigns and contacts are moved to the surviving business first. This cannot be undone.`
+    )) return;
+
+    setDeduping(true); setNotice(null);
+    try {
+      const res = await api.dedupeRun();
+      setNotice(`Removed ${res.removed} duplicate row(s). ${res.remaining} business${res.remaining === 1 ? '' : 'es'} left.`);
+      await onChanged();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Dedupe failed');
+    } finally {
+      setDeduping(false);
+    }
+  };
 
   const setStatus = async (b: Business, status: string) => {
     setBusy(b.id);
@@ -152,15 +214,36 @@ function TenantsTable({ businesses, onChanged, onNew }: {
 
   return (
     <section className="overflow-hidden rounded-brand border border-line bg-paper">
-      <div className="flex items-center justify-between border-b border-line px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
         <div>
           <h2 className="font-display text-[14px] font-semibold text-ink">All Tenants</h2>
-          <p className="mt-0.5 text-[12px] text-muted">Every business running on KONEK AI</p>
+          <p className="mt-0.5 text-[12px] text-muted">
+            {filtered.length} of {businesses.length} shown
+            {duplicates > 0 && ` · ${duplicates} duplicate row${duplicates === 1 ? '' : 's'}`}
+          </p>
         </div>
-        <Button variant="secondary" size="sm" className="gap-1.5" onClick={onNew}>
-          <Plus className="h-3.5 w-3.5" /> New business
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, email, number"
+              className="h-9 w-56 pl-8"
+            />
+          </div>
+          {duplicates > 0 && (
+            <Button variant="secondary" size="sm" className="gap-1.5" disabled={deduping} onClick={dedupe}>
+              <Trash2 className="h-3.5 w-3.5" /> {deduping ? 'Merging…' : `Merge ${duplicates} duplicate${duplicates === 1 ? '' : 's'}`}
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" className="gap-1.5" onClick={onNew}>
+            <Plus className="h-3.5 w-3.5" /> New business
+          </Button>
+        </div>
       </div>
+
+      {notice && <p className="border-b border-line px-5 py-3 text-[12px] text-muted">{notice}</p>}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[960px] text-left">
@@ -171,15 +254,19 @@ function TenantsTable({ businesses, onChanged, onNew }: {
               <th className="px-5 py-3 font-medium">Plan</th>
               <th className="px-5 py-3 font-medium">Calls Used</th>
               <th className="px-5 py-3 font-medium">Status</th>
+              <th className="px-5 py-3 font-medium">Created</th>
               <th className="px-5 py-3 text-right font-medium">MRR</th>
               <th className="px-5 py-3 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {businesses.map((b) => (
+            {filtered.map((b) => (
               <tr key={b.id} className="border-b border-line last:border-0 transition-colors hover:bg-surface">
                 <td className="px-5 py-4">
-                  <div className="text-[13px] font-medium text-ink">{b.name}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-medium text-ink">{b.name}</span>
+                    {duplicateIds.has(b.id) && <Badge tone="warning">duplicate</Badge>}
+                  </div>
                   <div className="mt-0.5 text-[11px] text-muted">{b.owner_email ?? '—'}</div>
                 </td>
                 <td className="px-5 py-4 font-mono text-[12px] text-muted">{b.outbound_number ?? '—'}</td>
@@ -200,6 +287,9 @@ function TenantsTable({ businesses, onChanged, onNew }: {
                     <StatusDot tone={b.status === 'active' ? 'success' : b.status === 'suspended' ? 'danger' : 'warning'} />
                     {b.status}
                   </Badge>
+                </td>
+                <td className="px-5 py-4 text-[12px] tabular-nums text-muted">
+                  {b.created_at ? new Date(b.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
                 </td>
                 <td className="px-5 py-4 text-right text-[13px] tabular-nums text-ink">
                   {b.mrr ? formatCurrency(b.mrr) : '—'}

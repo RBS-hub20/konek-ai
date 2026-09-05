@@ -55,6 +55,15 @@ export const api = {
   }>('/api/business'),
   updateBusiness: (id: string, patch: Partial<Business>) =>
     req<{ business: Business }>('/api/business', { method: 'PATCH', body: JSON.stringify({ id, ...patch }) }),
+  dedupePreview: () =>
+    req<{ duplicateGroups: number; wouldRemove: number; distinctMrr: number }>('/api/admin/dedupe'),
+  dedupeRun: () =>
+    req<{ removed: number; remaining: number; mrr: number; problems?: string[] }>('/api/admin/dedupe', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
+  dbHealth: () => req<Record<string, unknown>>('/api/db/health'),
+
   createBusiness: (input: Partial<Business>) =>
     req<{ business: Business }>('/api/business', { method: 'POST', body: JSON.stringify(input) }),
 

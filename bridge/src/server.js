@@ -47,6 +47,32 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* Playable audio for one voice, so voices can actually be auditioned
+     instead of chosen from a name. Returns a WAV the browser can play. */
+  if (url.pathname === '/voice-sample') {
+    if (!config.cartesiaKey) return json(res, 400, { error: 'CARTESIA_API_KEY is not set' });
+    const language = (url.searchParams.get('language') ?? 'TL').toUpperCase();
+    const text = url.searchParams.get('text')
+      ?? 'Hello po Renmar, si Kai ito from Nova Aesthetics. Kumusta po kayo? May quick question lang po ako, okay lang po ba?';
+    try {
+      const mulaw = await synthesizeToBuffer(text, language, {
+        voiceId: url.searchParams.get('voice'),
+        speed: url.searchParams.get('speed'),
+        model: url.searchParams.get('model'),
+      });
+      if (!mulaw.length) return json(res, 502, { error: 'No audio produced' });
+      const wav = wrapMulawWav(mulaw);
+      res.writeHead(200, {
+        'Content-Type': 'audio/wav',
+        'Content-Length': wav.length,
+        'Cache-Control': 'no-store',
+      });
+      return res.end(wav);
+    } catch (err) {
+      return json(res, 502, { error: err.message });
+    }
+  }
+
   /* Runs the REAL call path against a stub Twilio socket and reports what
      happened. Counts and event names only — no prompt or transcript text —
      so it is safe to expose without the shared secret. */
@@ -181,6 +207,67 @@ async function callProbe(language, seconds) {
   };
   try { session.end('Completed'); } catch { /* already closed */ }
   return result;
+}
+
+/** Collects a whole utterance as raw 8 kHz mu-law. */
+function synthesizeToBuffer(text, language, { voiceId = null, speed = null, model = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    const stream = new CartesiaStream({
+      language,
+      model,
+      speed,
+      onAudio: (b64) => parts.push(Buffer.from(b64, 'base64')),
+      onError: (err) => settle(() => reject(err)),
+    });
+
+    let done = false;
+    const settle = (fn) => { if (done) return; done = true; clearTimeout(timer); try { stream.close(); } catch {} fn(); };
+    const timer = setTimeout(() => settle(() => resolve(Buffer.concat(parts))), 12_000);
+
+    stream.connect()
+      .then(() => {
+        /* An explicit id overrides whatever the language would have chosen. */
+        if (voiceId) stream.voice = { ...stream.voice, id: voiceId };
+        stream.begin();
+        stream.push(text);
+        stream.end();
+        /* Give Sonic a moment past the last chunk before closing. */
+        setTimeout(() => settle(() => resolve(Buffer.concat(parts))), 6000);
+      })
+      .catch((err) => settle(() => reject(err)));
+  });
+}
+
+/**
+ * Wraps raw mu-law in a WAV container so a browser will play it.
+ * Non-PCM WAV needs an 18-byte fmt chunk and a fact chunk.
+ */
+function wrapMulawWav(mulaw) {
+  const header = Buffer.alloc(58);
+  let o = 0;
+  header.write('RIFF', o); o += 4;
+  header.writeUInt32LE(50 + mulaw.length, o); o += 4;
+  header.write('WAVE', o); o += 4;
+
+  header.write('fmt ', o); o += 4;
+  header.writeUInt32LE(18, o); o += 4;      // chunk size
+  header.writeUInt16LE(7, o); o += 2;       // 7 = mu-law
+  header.writeUInt16LE(1, o); o += 2;       // mono
+  header.writeUInt32LE(8000, o); o += 4;    // sample rate
+  header.writeUInt32LE(8000, o); o += 4;    // byte rate
+  header.writeUInt16LE(1, o); o += 2;       // block align
+  header.writeUInt16LE(8, o); o += 2;       // bits per sample
+  header.writeUInt16LE(0, o); o += 2;       // cbSize
+
+  header.write('fact', o); o += 4;
+  header.writeUInt32LE(4, o); o += 4;
+  header.writeUInt32LE(mulaw.length, o); o += 4;
+
+  header.write('data', o); o += 4;
+  header.writeUInt32LE(mulaw.length, o); o += 4;
+
+  return Buffer.concat([header, mulaw]);
 }
 
 /** Runs one short synthesis and counts the audio that comes back. */
