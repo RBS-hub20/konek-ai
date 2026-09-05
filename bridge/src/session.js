@@ -121,6 +121,14 @@ export class CallSession {
       vibe: this.params.vibe,
       language: this.params.language,
       customerName: this.params.customerName,
+      /* Set by the outbound TwiML. Whoever set the call up picked this
+         script; without forwarding it the app falls back to the tenant's own
+         receptionist prompt and the wrong script gets read. */
+      scriptId: this.params.scriptId,
+      company: this.params.company,
+      contact: this.params.contact,
+      industry: this.params.industry,
+      country: this.params.country,
     });
     this.callCfg = callCfg;
 

@@ -1,6 +1,6 @@
-import { getBusinessForRead, getLead, pickScript, safe, updateLead } from '@/lib/server/tenant';
+import { getBusinessForRead, getLead, getScript, logCall, pickScript, safe, updateLead } from '@/lib/server/tenant';
 import { type OutboundScript } from '@/lib/types2';
-import { buildOpenerLine } from '@/lib/voice/cindyReceptionist';
+import { buildOpenerLine, languageModeFor, speedFor } from '@/lib/voice/cindyReceptionist';
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
 import { guardCall } from '@/lib/server/operator';
 import { normalizePhone } from '@/lib/server/phone';
@@ -10,10 +10,16 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 /**
- * POST /api/leads/call — { leadId }
+ * POST /api/leads/call — { leadId, scriptId? }
  *
  * Cindy calls a sales lead. Same engine as a tenant call, but the context is
  * KONEK selling itself, so the pitch and the transfer target differ.
+ *
+ * scriptId is the script the operator had open in Script Studio. Whoever set
+ * the call up chose that script, so it wins outright — no re-ranking by the
+ * lead's industry, and no falling back to the tenant's own receptionist
+ * prompt. Without it (a call from the business dashboard) the best-matching
+ * default is picked as before.
  */
 export async function POST(req: Request) {
   const guard = guardCall(req);
@@ -24,8 +30,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = await readJson<{ leadId?: string }>(req);
+  const body = await readJson<{ leadId?: string; scriptId?: string | null; script_id?: string | null }>(req);
   if (!body?.leadId) return fail('leadId is required');
+  const chosenScriptId = (body.scriptId ?? body.script_id ?? null)?.trim() || null;
 
   try {
     const lead = await getLead(body.leadId);
@@ -44,12 +51,26 @@ export async function POST(req: Request) {
 
     /* A written opener read at a steady pace is far easier to follow on a
        phone line than one the model improvises. */
-    const script = await safe(() => pickScript(lead.industry, lead.country), null);
-    const vars = {
-      company: lead.company ?? 'your business',
-      contact: lead.contact_person ?? '',
-      industry: lead.industry ?? 'business',
-    };
+    let script: OutboundScript | null = null;
+    let scriptSource: 'selected' | 'auto' = 'auto';
+    if (chosenScriptId) {
+      script = await safe(() => getScript(chosenScriptId), null);
+      /* Refusing beats quietly dialling with a different script than the one
+         on screen — that is the bug this parameter exists to fix. */
+      if (!script) return fail('That script no longer exists. Reload Script Studio and pick one again.', 404);
+      if (script.is_active === false) return fail(`“${script.name}” is switched off. Turn it on or pick another script.`);
+      scriptSource = 'selected';
+    } else {
+      script = await safe(() => pickScript(lead.industry, lead.country), null);
+    }
+
+    const mode = languageModeFor(script, lead.country);
+    const speed = script ? speedFor(script, mode) : null;
+    console.log(
+      '[Outbound] Super Admin call - using script:', script?.name ?? '(none — business default)',
+      'speed:', speed, 'country:', lead.country, 'source:', scriptSource
+    );
+
     const opener = buildOpenerLine({
       script, company: lead.company, contact: lead.contact_person,
       industry: lead.industry, country: lead.country,
@@ -68,8 +89,8 @@ export async function POST(req: Request) {
           from: from!,
           twiml: outboundTwiml({
             company: lead.company, contact: lead.contact_person, language,
-            scriptId: script?.id ?? null, opener,
-            speed: script?.voice_settings?.speed ?? null,
+            scriptId: script?.id ?? null, opener, speed,
+            industry: lead.industry, country: lead.country,
           }),
           statusCallback: `${env.appUrl}/api/call/transcript`,
           statusCallbackEvent: ['initiated', 'answered', 'completed'],
@@ -101,6 +122,21 @@ export async function POST(req: Request) {
       twilio_sid: twilioSid,
     });
 
+    /* One row per dial, so the transcript callback has something to update and
+       the log records which script was actually read. */
+    const logged = await logCall({
+      business_id: business.id,
+      phone,
+      from_number: from ?? null,
+      customer_name: lead.contact_person ?? lead.company ?? null,
+      vibe: 'PRO_CLOSER',
+      language,
+      script_id: script?.id ?? null,
+      status,
+      twilio_sid: twilioSid,
+    });
+    if (logged.error) console.warn('[Outbound] call not logged:', logged.error);
+
     return ok(
       {
         success: true,
@@ -109,7 +145,8 @@ export async function POST(req: Request) {
         from,
         to: phone,
         language,
-        script: script ? { id: script.id, name: script.name, speed: script.voice_settings.speed } : null,
+        script: script ? { id: script.id, name: script.name, speed } : null,
+        scriptSource,
         opener,
         mode: hasMediaBridge ? 'conversation' : 'opener-only',
         ...(warning ? { warning } : {}),
@@ -150,6 +187,7 @@ function twilioHint(code: number | string | undefined | null, country: string | 
 function outboundTwiml(o: {
   company: string | null; contact: string | null; language: string;
   scriptId: string | null; opener: string; speed: number | null;
+  industry: string | null; country: string | null;
 }): string {
   if (hasMediaBridge) {
     const params = [
@@ -159,6 +197,8 @@ function outboundTwiml(o: {
       ['language', o.language],
       ['vibe', 'PRO_CLOSER'],
       ['scriptId', o.scriptId ?? ''],
+      ['industry', o.industry ?? ''],
+      ['country', o.country ?? ''],
       ['speed', o.speed != null ? String(o.speed) : ''],
     ]
       .filter(([, v]) => v)

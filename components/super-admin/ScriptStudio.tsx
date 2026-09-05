@@ -27,7 +27,16 @@ const blankScript = (): Partial<OutboundScript> => ({
   script_steps: SCRIPT_STEPS.map((step) => ({ step, text: '', pause_ms: 400 })),
 });
 
-export function ScriptStudio() {
+/**
+ * onActiveScriptChange reports which saved script is open in the editor, so
+ * the page above can dial with it. An unsaved draft reports null — there is
+ * nothing for the call to read yet.
+ */
+export function ScriptStudio({
+  onActiveScriptChange,
+}: {
+  onActiveScriptChange?: (script: OutboundScript | null) => void;
+} = {}) {
   const [scripts, setScripts] = useState<OutboundScript[]>([]);
   const [editing, setEditing] = useState<Partial<OutboundScript> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,6 +70,19 @@ export function ScriptStudio() {
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
+
+  /* Nothing picked yet means the default is what a call would use, so say so
+     rather than leaving the page guessing. */
+  useEffect(() => {
+    if (!onActiveScriptChange) return;
+    if (editing?.id) {
+      onActiveScriptChange(scripts.find((s) => s.id === editing.id) ?? (editing as OutboundScript));
+      return;
+    }
+    if (editing) { onActiveScriptChange(null); return; }
+    const active = scripts.filter((s) => s.is_active !== false);
+    onActiveScriptChange(active.find((s) => s.is_default) ?? active[0] ?? null);
+  }, [editing, scripts, onActiveScriptChange]);
 
   const shown = scripts.filter(
     (s) => (filterIndustry === 'all' || s.industry === filterIndustry) &&

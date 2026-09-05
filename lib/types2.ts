@@ -136,6 +136,8 @@ export interface CallLog {
   recording_url: string | null;
   transcript: string | null;
   twilio_sid: string | null;
+  /** The outbound script Cindy read, when the call was set up with one. */
+  script_id: string | null;
   created_at: string;
 }
 

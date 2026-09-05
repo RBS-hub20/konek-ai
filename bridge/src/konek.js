@@ -15,12 +15,23 @@ const headers = () => ({
  * Falls back to a usable generic agent if the app is unreachable, so a
  * deploy blip on Vercel does not leave the caller in silence.
  */
-export async function fetchCallConfig({ businessId, vibe, language, customerName }) {
+export async function fetchCallConfig({
+  businessId, vibe, language, customerName,
+  scriptId, company, contact, industry, country,
+}) {
   const url = new URL(`${config.appUrl}/api/call/config`);
   if (businessId) url.searchParams.set('businessId', businessId);
   if (vibe) url.searchParams.set('vibe', vibe);
   if (language) url.searchParams.set('language', language);
   if (customerName) url.searchParams.set('customerName', customerName);
+  /* An outbound call was set up against one specific script. Passing it on is
+     what makes the call read that script instead of the tenant's own
+     receptionist prompt. */
+  if (scriptId) url.searchParams.set('scriptId', scriptId);
+  if (company) url.searchParams.set('company', company);
+  if (contact) url.searchParams.set('contact', contact);
+  if (industry) url.searchParams.set('industry', industry);
+  if (country) url.searchParams.set('country', country);
 
   try {
     const res = await fetch(url, {
@@ -31,7 +42,16 @@ export async function fetchCallConfig({ businessId, vibe, language, customerName
       const body = await res.text().catch(() => '');
       throw new Error(`${res.status} ${body.slice(0, 200)}`);
     }
-    return await res.json();
+    const cfg = await res.json();
+    log.info(
+      'konek',
+      cfg.script
+        ? `script "${cfg.script.name}" (${cfg.script.id}), speed ${cfg.speed ?? 'default'}`
+        : scriptId
+          ? `asked for script ${scriptId} but the app returned none — using the business prompt`
+          : 'no script for this call — using the business prompt'
+    );
+    return cfg;
   } catch (err) {
     log.warn('konek', `Could not fetch call config, using fallback: ${err.message}`);
     return fallbackConfig(vibe, language);

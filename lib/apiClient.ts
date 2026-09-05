@@ -79,10 +79,14 @@ export const api = {
   updateLead: (id: string, patch: Partial<Lead>) =>
     req<{ lead: Lead }>('/api/leads', { method: 'PATCH', body: JSON.stringify({ id, ...patch }) }),
   deleteLead: (id: string) => req<{ deleted: string }>(`/api/leads?id=${id}`, { method: 'DELETE' }),
-  callLead: (leadId: string) =>
-    req<{ success: boolean; twilioSid: string | null; to: string; language: string; warning?: string }>(
-      '/api/leads/call', { method: 'POST', body: JSON.stringify({ leadId }) }
-    ),
+  /* scriptId is the script open in Script Studio — the call reads that one. */
+  callLead: (leadId: string, scriptId?: string | null) =>
+    req<{
+      success: boolean; twilioSid: string | null; to: string; language: string;
+      script: { id: string; name: string; speed: number | null } | null;
+      scriptSource: 'selected' | 'auto';
+      warning?: string;
+    }>('/api/leads/call', { method: 'POST', body: JSON.stringify({ leadId, scriptId: scriptId ?? null }) }),
   salesSettings: () => req<{ sales: SalesSettings }>('/api/platform/sales'),
   saveSalesSettings: (patch: Partial<SalesSettings>) =>
     req<{ sales: SalesSettings }>('/api/platform/sales', { method: 'POST', body: JSON.stringify(patch) }),

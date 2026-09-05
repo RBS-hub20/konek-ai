@@ -12,7 +12,7 @@ import { UnlockDialog } from '@/components/admin/UnlockDialog';
 import { ScriptStudio } from '@/components/super-admin/ScriptStudio';
 import { api, tryApi } from '@/lib/apiClient';
 import { needsUnlock } from '@/lib/store';
-import type { Lead, SalesSettings } from '@/lib/types2';
+import { DEFAULT_VOICE_SETTINGS, type Lead, type OutboundScript, type SalesSettings } from '@/lib/types2';
 import { cn } from '@/lib/utils';
 
 const INDUSTRIES = [
@@ -45,6 +45,9 @@ export default function OutboundPage() {
   const [showUnlock, setShowUnlock] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
+  /* Whatever is open in Script Studio is what the call reads — the operator
+     set the call up here, so this script wins over the tenant's own. */
+  const [script, setScript] = useState<OutboundScript | null>(null);
 
   const [form, setForm] = useState({ company: '', contact_person: '', industry: 'Laundry' });
   /* Same component the test-call dialog uses, so the number is already E.164
@@ -87,8 +90,9 @@ export default function OutboundPage() {
   const call = async (id: string) => {
     setCalling(id); setNotice(null);
     try {
-      const res = await api.callLead(id);
-      setNotice(res.warning ?? `Cindy is calling ${res.to} in ${res.language}.`);
+      const res = await api.callLead(id, script?.id ?? null);
+      const using = res.script ? ` Reading “${res.script.name}” at ${res.script.speed ?? '—'}.` : '';
+      setNotice((res.warning ?? `Cindy is calling ${res.to} in ${res.language}.`) + using);
       await load();
     } catch (err) {
       if (needsUnlock(err)) { setPending(id); setShowUnlock(true); }
@@ -141,7 +145,9 @@ export default function OutboundPage() {
 
       <Funnel leads={leads} active={filter} onPick={setFilter} />
 
-      <ScriptStudio />
+      <CallingWith script={script} />
+
+      <ScriptStudio onActiveScriptChange={setScript} />
 
       {/* Add lead */}
       <section className="rounded-brand border border-line bg-paper p-5">
@@ -242,6 +248,32 @@ export default function OutboundPage() {
         onUnlocked={() => { if (pending) void call(pending); setPending(null); }}
       />
     </div>
+  );
+}
+
+/* ── Which script the next call reads ────────────────────────────── */
+
+/* The bug this answers: the script on screen and the script the call read
+   were not the same one, and nothing on the page said so. */
+function CallingWith({ script }: { script: OutboundScript | null }) {
+  const speed = script?.voice_settings?.speed ?? DEFAULT_VOICE_SETTINGS.speed;
+  return (
+    <section className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-brand border border-line bg-surface px-4 py-3 text-[12px]">
+      <Megaphone className="h-3.5 w-3.5 shrink-0 text-muted" />
+      <span className="text-muted">Calling with:</span>
+      {script ? (
+        <>
+          <span className="font-medium text-ink">{script.name}</span>
+          {script.is_builtin && <Badge tone="accent">built-in</Badge>}
+          <Badge>{script.country}</Badge>
+          <span className="tabular-nums text-muted">speed {speed}</span>
+        </>
+      ) : (
+        <span className="text-muted">
+          nothing picked — Cindy falls back to the best match for each lead&rsquo;s industry and country.
+        </span>
+      )}
+    </section>
   );
 }
 

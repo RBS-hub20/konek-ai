@@ -543,6 +543,7 @@ const normalizeCall = (r: Record<string, unknown>): CallLog => ({
   recording_url: (r.recording_url as string) ?? null,
   transcript: (r.transcript as string) ?? null,
   twilio_sid: (r.twilio_sid as string) ?? null,
+  script_id: (r.script_id as string) ?? null,
   created_at: (r.created_at as string) ?? nowIso(),
 });
 
@@ -575,6 +576,7 @@ export async function createCallLog(input: Partial<CallLog>): Promise<CallLog> {
     recording_url: input.recording_url ?? null,
     transcript: input.transcript ?? null,
     twilio_sid: input.twilio_sid ?? null,
+    script_id: input.script_id ?? null,
   };
   if (!hasSupabase) {
     const created = normalizeCall({ ...row, id: uuid(), created_at: nowIso() });
@@ -964,6 +966,8 @@ export async function logCall(row: {
   status?: string;
   skills_used?: string[];
   twilio_sid?: string | null;
+  /* Which outbound script Cindy read, when the call was set up with one. */
+  script_id?: string | null;
 }): Promise<{ id: string | null; dropped: string[]; error: string | null }> {
   if (!hasSupabase) {
     const created = await createCallLog({
@@ -973,9 +977,11 @@ export async function logCall(row: {
       customer_name: row.customer_name ?? null,
       phone: row.phone,
       vibe: row.vibe ?? null,
+      language: row.language ?? null,
       status: row.status ?? 'Initiated',
       skills_used: row.skills_used ?? [],
       twilio_sid: row.twilio_sid ?? null,
+      script_id: row.script_id ?? null,
     });
     return { id: created.id, dropped: [], error: null };
   }
@@ -1000,6 +1006,7 @@ export async function logCall(row: {
       skills_used: row.skills_used ?? [],
       duration_seconds: 0,
       twilio_sid: row.twilio_sid ?? null,
+      script_id: row.script_id ?? null,
     }
   );
 
