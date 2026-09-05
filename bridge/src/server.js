@@ -112,6 +112,9 @@ const server = http.createServer(async (req, res) => {
       JSON.stringify({
         ok: true,
         service: 'konek-ai-bridge',
+        /* Railway sets this on every deploy. Without it there is no way to
+           tell from outside whether a fix is actually live on the bridge. */
+        commit: (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7) || 'unknown',
         uptimeSeconds: Math.round((Date.now() - started) / 1000),
         activeCalls,
         totalCalls,
