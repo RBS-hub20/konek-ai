@@ -66,6 +66,10 @@ const COLUMN_TYPES: Record<string, string> = {
   last_called_at: 'timestamptz',
   transferred_to: 'text',
   transfer_status: 'text',
+  script_id: 'uuid',
+  script_steps: "jsonb default '[]'::jsonb",
+  voice_settings: "jsonb default '{\"speed\":0.92,\"emotion\":\"professional\",\"pause_ms\":400}'::jsonb",
+  is_default: 'boolean default false',
   key: 'text primary key',
   updated_at: 'timestamptz default now()',
   notes: 'text',
@@ -85,6 +89,7 @@ const TABLE_OVERRIDES: Record<string, Record<string, string>> = {
   skills: { name: 'text', is_active: 'boolean default true' },
   services: { name: 'text', is_active: 'boolean default true', status: 'text' },
   leads: { name: 'text', status: "text default 'New'" },
+  outbound_scripts: { name: 'text', industry: "text default 'generic'", vibe: "text default 'professional'", country: "text default 'ALL'", is_active: 'boolean default true' },
   business_skills: { is_active: 'boolean default false' },
 };
 
@@ -129,7 +134,11 @@ const EXPECTED: Record<string, string[]> = {
   call_logs: [
     'id', 'business_id', 'campaign_id', 'contact_id', 'customer_name', 'phone',
     'vibe', 'language', 'duration_seconds', 'status', 'recording_url', 'transcript',
-    'twilio_sid', 'skills_used', 'transferred_to', 'transfer_status', 'created_at',
+    'twilio_sid', 'skills_used', 'transferred_to', 'transfer_status', 'script_id', 'created_at',
+  ],
+  outbound_scripts: [
+    'id', 'name', 'industry', 'vibe', 'country', 'script_steps', 'voice_settings',
+    'is_active', 'is_default', 'created_at',
   ],
   services: ['id', 'business_id', 'name', 'price', 'description', 'duration', 'category', 'is_active', 'sort_order', 'created_at'],
   leads: [
