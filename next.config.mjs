@@ -20,6 +20,14 @@ const nextConfig = {
 
   /* No `output: 'export'` — the API routes need a server runtime. */
 
+  /* A real HTTP redirect. redirect() from a statically prerendered page emits
+     a 307 with no Location header, which a browser cannot follow. */
+  async redirects() {
+    return [
+      { source: '/super-admin', destination: '/super-admin/overview', permanent: false },
+    ];
+  },
+
   images: {
     /* Brand assets are local files in /public. Remote HTTPS hosts are allowed
        so uploaded logos or CDN assets work without a config change. */
