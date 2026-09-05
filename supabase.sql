@@ -302,5 +302,28 @@ where slug is null
   and id = (select id from businesses order by created_at asc limit 1);
 
 -- ── 15 · Reload PostgREST's schema cache ────────────────────────────
--- Without this, new columns can still read as "not found in the schema cache".
+-- New tables and columns can still read as "not found in the schema cache"
+-- until PostgREST reloads. This notify usually handles it, but the reload can
+-- race a long migration and pick up a half-applied schema.
+--
+-- If Schema Health still shows columns missing after running this, run just
+-- this one line again on its own:
+--
+--   notify pgrst, 'reload schema';
+--
+-- The function below exposes the same thing over the API, so the Reload cache
+-- button on /super-admin/settings can do it without opening the SQL editor.
+create or replace function public.reload_schema_cache()
+returns text
+language plpgsql
+security definer
+as $$
+begin
+  notify pgrst, 'reload schema';
+  return 'schema cache reload requested';
+end;
+$$;
+
+grant execute on function public.reload_schema_cache() to anon, authenticated, service_role;
+
 notify pgrst, 'reload schema';

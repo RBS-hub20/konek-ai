@@ -3,11 +3,31 @@
 import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { useState } from 'react';
+import { api } from '@/lib/apiClient';
 import { useSuperAdmin } from '@/components/super-admin/SuperAdminData';
 
 /* The one screen that answers "why is that field empty?" */
 export default function SchemaHealthPage() {
   const { schema, services, loading, reload } = useSuperAdmin();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  /* A migrated column can read as absent until PostgREST catches up, which
+     looks identical to never having run the migration. */
+  const reloadCache = async () => {
+    setBusy(true); setNotice(null);
+    try {
+      await api.dbReload();
+      await new Promise((r) => setTimeout(r, 1500));
+      await reload();
+      setNotice('Schema cache reloaded.');
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not reload the cache');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (loading) return <p className="py-20 text-[13px] text-muted">Checking…</p>;
 
@@ -29,9 +49,15 @@ export default function SchemaHealthPage() {
             What the database actually has, against what the app writes.
           </p>
         </div>
-        <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => void reload()}>
-          <RefreshCw className="h-3.5 w-3.5" /> Re-check
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {notice && <span className="text-[12px] text-muted">{notice}</span>}
+          <Button variant="secondary" size="sm" className="gap-1.5" disabled={busy} onClick={() => void reloadCache()}>
+            <RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} /> Reload cache
+          </Button>
+          <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => void reload()}>
+            <RefreshCw className="h-3.5 w-3.5" /> Re-check
+          </Button>
+        </div>
       </div>
 
       <section className={`rounded-brand border p-5 ${healthy ? 'border-line' : 'border-amber-500/40'} bg-paper`}>

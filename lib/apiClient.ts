@@ -63,6 +63,7 @@ export const api = {
       body: JSON.stringify({ confirm: true }),
     }),
   dbHealth: () => req<Record<string, unknown>>('/api/db/health'),
+  dbReload: () => req<{ reloaded: boolean; note: string }>('/api/db/reload', { method: 'POST' }),
 
   createBusiness: (input: Partial<Business>) =>
     req<{ business: Business }>('/api/business', { method: 'POST', body: JSON.stringify(input) }),
