@@ -1,8 +1,11 @@
 import WebSocket from 'ws';
-import { config, voiceForVibe, useCartesia } from './config.js';
+import { config, voiceForVibe, useCartesia, useDeepgram } from './config.js';
 import { log } from './log.js';
 import { fetchCallConfig, reportCall, requestHandoff } from './konek.js';
-import { CartesiaStream } from './cartesia.js';
+import { CartesiaStream, emotionTags } from './cartesia.js';
+import { DeepgramStream } from './deepgram.js';
+import { streamReply, trimHistory } from './llm.js';
+import { recordCallSummary } from './summary.js';
 import { LanguageTracker, detectHandoff, detectInterest } from './detect.js';
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -367,7 +370,9 @@ export class CallSession {
 
   async connectOpenAI() {
     this.stage = 'fetching call config';
-    await this.loadCallConfig();
+    /* The rest of this method reads it, so the result is bound rather than
+       discarded — the refactor that split loadCallConfig out left it behind. */
+    const callCfg = await this.loadCallConfig();
 
     this.stage = 'resolving voice';
     /* Bring Sonic up before the model starts talking. If it cannot connect we

@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { config, assertConfig, useCartesia } from './config.js';
+import { config, assertConfig, useCartesia, useDeepgram } from './config.js';
 import { log, recentLogs } from './log.js';
 import { CallSession, SEEN_EVENTS as SEEN_EVENT_TYPES } from './session.js';
 import { EventEmitter } from 'node:events';
