@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Flame, Megaphone, Phone, Pin, PinOff, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
+import { ChevronDown, Flame, Megaphone, Phone, Pin, PinOff, Play, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/ui/StatCard';
@@ -12,6 +12,7 @@ import { UnlockDialog } from '@/components/admin/UnlockDialog';
 import { ScriptStudio } from '@/components/super-admin/ScriptStudio';
 import { PowerDialer } from '@/components/super-admin/PowerDialer';
 import { LeadImport } from '@/components/super-admin/LeadImport';
+import { LeadRecording } from '@/components/super-admin/LeadRecording';
 import { api, tryApi } from '@/lib/apiClient';
 import {
   DEFAULT_VOICE_SETTINGS, type Lead, type LeadWithScript, type OutboundScript, type SalesSettings,
@@ -67,6 +68,8 @@ export default function OutboundPage() {
   /* Shown after a lead is added, so the answer to "which script?" arrives
      without hunting for the row. */
   const [added, setAdded] = useState<LeadWithScript | null>(null);
+  /* Which lead's last call is open for playback, under its row. */
+  const [playing, setPlaying] = useState<string | null>(null);
 
   const [form, setForm] = useState({ company: '', contact_person: '', industry: 'Laundry' });
   /* Same component the test-call dialog uses, so the number is already E.164
@@ -302,7 +305,8 @@ export default function OutboundPage() {
               </thead>
               <tbody>
                 {shown.map((l) => (
-                  <tr key={l.id} className="border-b border-line last:border-0 hover:bg-surface">
+                  <Fragment key={l.id}>
+                  <tr className="border-b border-line last:border-0 hover:bg-surface">
                     <td className="px-5 py-4 text-[13px] font-medium text-ink">{l.company ?? '—'}</td>
                     <td className="px-5 py-4 text-[13px] text-muted">{l.contact_person ?? '—'}</td>
                     <td className="px-5 py-4 font-mono text-[12px] text-muted">
@@ -359,6 +363,18 @@ export default function OutboundPage() {
                         >
                           <Phone className="h-3.5 w-3.5" /> Call now
                         </Button>
+                        {l.call_count > 0 && (
+                          <button
+                            type="button"
+                            title="Hear the last call to this lead"
+                            onClick={() => setPlaying(playing === l.id ? null : l.id)}
+                            className="inline-flex items-center gap-1 rounded p-1.5 text-[12px] text-accent transition-colors hover:bg-surface focus-ring"
+                          >
+                            {playing === l.id
+                              ? <><ChevronDown className="h-3.5 w-3.5" /> Hide</>
+                              : <><Play className="h-3.5 w-3.5" /> Replay</>}
+                          </button>
+                        )}
                         <button
                           type="button" aria-label={`Delete ${l.company}`}
                           onClick={async () => { await api.deleteLead(l.id); await load(); }}
@@ -369,6 +385,14 @@ export default function OutboundPage() {
                       </div>
                     </td>
                   </tr>
+                  {playing === l.id && (
+                    <tr className="border-b border-line bg-surface last:border-0">
+                      <td colSpan={8} className="px-5 py-5">
+                        <LeadRecording leadId={l.id} label={l.company ?? l.phone} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

@@ -224,6 +224,9 @@ export function PowerDialer({
                   How Cindy sounded
                 </div>
                 <audio controls preload="metadata" src={call.recordingUrl} className="w-full" />
+                <p className="mt-1.5 text-[11px] text-muted">
+                  Also in Activity, under this call, once Twilio has written it.
+                </p>
               </div>
             )}
 

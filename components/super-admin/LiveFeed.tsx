@@ -9,6 +9,7 @@ import type { CallLog } from '@/lib/types2';
 import { vibeToLabel } from '@/lib/types2';
 import { LANGUAGES, languageFlag, languageToKey } from '@/lib/ai/languages';
 import { cn } from '@/lib/utils';
+import { CallPlayer, CallTranscript } from '@/components/super-admin/CallPlayer';
 
 /* ── Live feed ───────────────────────────────────────────────────── */
 
@@ -112,8 +113,6 @@ export function LiveFeed({ calls }: { calls: CallLog[] }) {
 /* The audio streams through the app rather than from Twilio: Twilio's media
    URL needs the account credentials, which do not belong in a page. */
 function CallDetail({ call, onClose }: { call: CallLog; onClose: () => void }) {
-  const [failed, setFailed] = useState(false);
-
   return (
     <div
       className="fixed inset-0 z-[60] flex items-end justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center"
@@ -149,30 +148,12 @@ function CallDetail({ call, onClose }: { call: CallLog; onClose: () => void }) {
             <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted">
               How Cindy sounded
             </div>
-            {failed ? (
-              <p className="text-[12px] leading-relaxed text-muted">
-                No recording for this call. Calls placed before recording was switched on do not have one.
-              </p>
-            ) : (
-              <audio
-                controls
-                preload="metadata"
-                src={`/api/try-free-call/${call.id}/audio`}
-                onError={() => setFailed(true)}
-                className="w-full"
-              />
-            )}
+            <CallPlayer call={call} compact />
           </div>
 
           <div>
             <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted">Transcript</div>
-            {call.transcript ? (
-              <p className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-brand border border-line bg-surface p-3.5 text-[12px] leading-relaxed text-ink">
-                {call.transcript}
-              </p>
-            ) : (
-              <p className="text-[12px] text-muted">No transcript for this call.</p>
-            )}
+            <CallTranscript call={call} />
           </div>
         </div>
       </div>

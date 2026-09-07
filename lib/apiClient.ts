@@ -109,6 +109,9 @@ export const api = {
     req<{ created: number; skipped: number; details: { row: number; value: string; why: string }[]; leads: Lead[] }>(
       '/api/leads/import', { method: 'POST', body: JSON.stringify({ csv, country: country ?? null }) }
     ),
+  /* The last call placed to a lead, for playback in the call list. */
+  leadCall: (leadId: string) =>
+    req<{ call: CallLog | null; reason?: string }>(`/api/leads/${leadId}/call`),
   salesSettings: () => req<{ sales: SalesSettings }>('/api/platform/sales'),
   saveSalesSettings: (patch: Partial<SalesSettings>) =>
     req<{ sales: SalesSettings }>('/api/platform/sales', { method: 'POST', body: JSON.stringify(patch) }),

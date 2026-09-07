@@ -1,6 +1,11 @@
 'use client';
 
+import { Fragment, useState } from 'react';
+import { ChevronDown, Play } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
+import { Select } from '@/components/ui/Input';
+import { CallPlayer, CallTranscript } from '@/components/super-admin/CallPlayer';
+import { cn } from '@/lib/utils';
 import type { Business, CallLog } from '@/lib/types2';
 import { vibeToLabel } from '@/lib/types2';
 import { LANGUAGES, languageFlag, languageToKey } from '@/lib/ai/languages';
@@ -9,17 +14,37 @@ import { LANGUAGES, languageFlag, languageToKey } from '@/lib/ai/languages';
 
 export function ActivityTab({ calls, businesses }: { calls: CallLog[]; businesses: Business[] }) {
   const nameOf = (id: string | null) => businesses.find((b) => b.id === id)?.name ?? '—';
+  /* Which call is open for playback. One at a time — two players going at
+     once is never what anybody wanted. */
+  const [open, setOpen] = useState<string | null>(null);
+  const [business, setBusiness] = useState('all');
+
+  const shown = business === 'all' ? calls : calls.filter((c) => c.business_id === business);
+
   return (
     <div className="space-y-6">
-      <LanguageBreakdown calls={calls} />
+      <LanguageBreakdown calls={shown} />
 
     <section className="overflow-hidden rounded-brand border border-line bg-paper">
-      <div className="border-b border-line px-5 py-4">
-        <h2 className="font-display text-[14px] font-semibold text-ink">Recent Activity</h2>
-        <p className="mt-0.5 text-[12px] text-muted">Calls across every business</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+        <div>
+          <h2 className="font-display text-[14px] font-semibold text-ink">Recent Activity</h2>
+          <p className="mt-0.5 text-[12px] text-muted">
+            {business === 'all'
+              ? 'Calls across every business'
+              : `${shown.length} call${shown.length === 1 ? '' : 's'} for ${nameOf(business)}`}
+            {' · click a row to hear it'}
+          </p>
+        </div>
+        <Select value={business} onChange={(e) => { setBusiness(e.target.value); setOpen(null); }} className="h-9 w-auto">
+          <option value="all">All businesses</option>
+          {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </Select>
       </div>
-      {calls.length === 0 ? (
-        <p className="px-5 py-12 text-center text-[13px] text-muted">Nothing yet.</p>
+      {shown.length === 0 ? (
+        <p className="px-5 py-12 text-center text-[13px] text-muted">
+          {calls.length === 0 ? 'Nothing yet.' : 'No calls for this business.'}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left">
@@ -32,11 +57,19 @@ export function ActivityTab({ calls, businesses }: { calls: CallLog[]; businesse
                 <th className="px-5 py-3 font-medium">Duration</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">When</th>
+                <th className="px-5 py-3 font-medium">Recording</th>
               </tr>
             </thead>
             <tbody>
-              {calls.map((c) => (
-                <tr key={c.id} className="border-b border-line last:border-0 hover:bg-surface">
+              {shown.map((c) => (
+                <Fragment key={c.id}>
+                <tr
+                  className={cn(
+                    'cursor-pointer border-b border-line last:border-0 hover:bg-surface',
+                    open === c.id && 'bg-surface'
+                  )}
+                  onClick={() => setOpen(open === c.id ? null : c.id)}
+                >
                   <td className="px-5 py-3.5 text-[13px] text-ink">{nameOf(c.business_id)}</td>
                   <td className="px-5 py-3.5">
                     <div className="text-[13px] text-ink">{c.customer_name || 'Unknown'}</div>
@@ -51,7 +84,35 @@ export function ActivityTab({ calls, businesses }: { calls: CallLog[]; businesse
                   </td>
                   <td className="px-5 py-3.5"><Badge tone={c.status === 'Hot Lead' ? 'accent' : 'default'}>{c.status}</Badge></td>
                   <td className="px-5 py-3.5 text-[12px] text-muted">{new Date(c.created_at).toLocaleString()}</td>
+                  <td className="px-5 py-3.5">
+                    <span className="inline-flex items-center gap-1.5 text-[12px] text-accent">
+                      {open === c.id
+                        ? <><ChevronDown className="h-3.5 w-3.5" /> Hide</>
+                        : <><Play className="h-3.5 w-3.5" /> Play</>}
+                    </span>
+                  </td>
                 </tr>
+                {open === c.id && (
+                  <tr className="border-b border-line bg-surface last:border-0">
+                    <td colSpan={8} className="px-5 py-5">
+                      <div className="grid gap-5 lg:grid-cols-2">
+                        <div>
+                          <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted">
+                            How Cindy sounded
+                          </div>
+                          <CallPlayer call={c} />
+                        </div>
+                        <div>
+                          <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted">
+                            Transcript
+                          </div>
+                          <CallTranscript call={c} />
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

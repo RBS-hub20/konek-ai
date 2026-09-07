@@ -4,10 +4,11 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 /**
- * GET /api/try-free-call/:id/audio?t=<token> — the demo call, playable.
+ * GET /api/call/audio/:id — the recording of any call, playable.
  *
- * Kept because the welcome screen links to it. /api/call/audio/:id is the
- * same thing under a name that also makes sense for a sales call.
+ * The console's own name for it. /api/try-free-call/:id/audio is the same
+ * implementation under the name the trial funnel gave it first, which reads
+ * oddly on a sales call.
  */
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   return streamCallRecording(req, params.id?.trim());
