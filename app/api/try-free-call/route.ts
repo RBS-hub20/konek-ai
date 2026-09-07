@@ -6,6 +6,8 @@ import { normalizePhone } from '@/lib/server/phone';
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
 import { describeError, fail, ok, readJson } from '@/lib/server/http';
 import { checkTrialGate, markTrialCall } from '@/lib/server/trialGate';
+import { signTrialCall } from '@/lib/server/trialToken';
+import { explainTwilioFailure } from '@/lib/server/twilioStatus';
 import type { OutboundScript } from '@/lib/types2';
 
 export const dynamic = 'force-dynamic';
@@ -53,7 +55,17 @@ export async function POST(req: Request) {
   try {
     const { business } = await getBusinessForRead(null);
     const from = business.outbound_number?.trim() || env.twilioNumber;
-    if (hasTwilio && !from) return fail('No outbound number is configured yet.', 503);
+
+    /* Saying "we called you" when nothing was dialled is the worst possible
+       outcome here, so a deployment that cannot call says so. */
+    if (!hasTwilio) {
+      console.error('[TryFreeCall] Twilio not configured — no call placed.');
+      return fail('Twilio not configured — this deployment cannot place calls yet.', 503);
+    }
+    if (!from) {
+      console.error('[TryFreeCall] No from number — set TWILIO_PHONE_NUMBER or the tenant outbound_number.');
+      return fail('Twilio not configured — no outbound number is set.', 503);
+    }
 
     /* The country decides the script, which decides the language and the
        pace. A Manila number hears Taglish from the first word. */
@@ -86,36 +98,38 @@ export async function POST(req: Request) {
     markTrialCall(phone);
 
     let twilioSid: string | null = null;
-    let warning: string | undefined;
 
-    if (hasTwilio) {
-      try {
-        const { default: Twilio } = await import('twilio');
-        const client = Twilio(env.twilioSid, env.twilioToken);
-        const call = await client.calls.create({
-          to: phone,
-          from: from!,
-          twiml: trialTwiml({ company: businessName, language, industry, country, scriptId: script?.id ?? null, opener, speed }),
-          statusCallback: `${env.appUrl}/api/call/transcript`,
-          statusCallbackEvent: ['initiated', 'answered', 'completed'],
-          statusCallbackMethod: 'POST',
-        });
-        twilioSid = call.sid;
-      } catch (err) {
-        const t = err as { message?: string; code?: number | string };
-        await safe(() => updateLead(lead.id, { status: 'No answer' }), null);
-        return Response.json(
-          {
-            success: false,
-            error: 'The call could not be placed. Try again in a moment.',
-            twilioError: t.message,
-            twilioCode: t.code ?? null,
-          },
-          { status: 502 }
-        );
-      }
-    } else {
-      warning = 'Twilio is not configured here, so no phone actually rang.';
+    try {
+      const { default: Twilio } = await import('twilio');
+      const client = Twilio(env.twilioSid, env.twilioToken);
+      const call = await client.calls.create({
+        to: phone,
+        from,
+        twiml: trialTwiml({ company: businessName, language, industry, country, scriptId: script?.id ?? null, opener, speed }),
+        statusCallback: `${env.appUrl}/api/call/transcript`,
+        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+        statusCallbackMethod: 'POST',
+      });
+      twilioSid = call.sid;
+      console.log(`[TryFreeCall] Twilio call created: ${call.sid} to ${phone} from ${from} (status ${call.status})`);
+    } catch (err) {
+      const t = err as { message?: string; code?: number | string };
+      const code = typeof t.code === 'string' ? Number(t.code) : t.code ?? null;
+      console.error(`[TryFreeCall] Twilio refused the call to ${phone}: ${t.message} (code ${t.code})`);
+      await safe(() => updateLead(lead.id, {
+        status: 'No answer',
+        notes: `Twilio refused: ${t.message ?? 'unknown'} (code ${t.code ?? 'none'})`,
+      }), null);
+      return Response.json(
+        {
+          success: false,
+          error: 'The call could not be placed.',
+          hint: explainTwilioFailure(Number.isFinite(code) ? (code as number) : null, phone),
+          twilioError: t.message,
+          twilioCode: t.code ?? null,
+        },
+        { status: 502 }
+      );
     }
 
     await safe(() => updateLead(lead.id, { twilio_sid: twilioSid, last_called_at: new Date().toISOString(), call_count: 1 }), null);
@@ -133,11 +147,17 @@ export async function POST(req: Request) {
       twilio_sid: twilioSid,
     });
 
+    if (logged.dropped.length) {
+      console.warn('[TryFreeCall] call_logs is missing columns, not saved:', logged.dropped.join(', '));
+    }
+
     return ok(
       {
         success: true,
-        /* What the welcome screen polls. */
+        /* What the welcome screen polls, and its proof of ownership — the
+           screen must not depend on is_trial, which a stale schema drops. */
         callId: logged.id,
+        callToken: logged.id ? signTrialCall(logged.id) : null,
         leadId: lead.id,
         twilioSid,
         to: phone,
@@ -147,7 +167,6 @@ export async function POST(req: Request) {
         script: script ? { id: script.id, name: script.name, speed } : null,
         opener,
         mode: hasMediaBridge ? 'conversation' : 'opener-only',
-        ...(warning ? { warning } : {}),
       },
       { status: 201 }
     );

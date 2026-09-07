@@ -60,7 +60,9 @@ export function TryFreeCallModal({ open, onClose }: { open: boolean; onClose: ()
         setError(
           body.rateLimited
             ? `${body.error} Try again in about ${body.retryAfterHours} hour${body.retryAfterHours === 1 ? '' : 's'}.`
-            : body.error ?? 'The call could not be placed.'
+            /* Twilio's reason, in words, beats "something went wrong" — this
+               is the message that tells an operator what to go and fix. */
+            : [body.error, body.hint].filter(Boolean).join(' ') || 'The call could not be placed.'
         );
         return;
       }
@@ -69,6 +71,7 @@ export function TryFreeCallModal({ open, onClose }: { open: boolean; onClose: ()
          hand-off to the welcome screen does not beat the actual call. */
       const params = new URLSearchParams({
         callId: String(body.callId ?? ''),
+        t: String(body.callToken ?? ''),
         newUser: 'true',
         name: businessName.trim(),
         phone: String(body.to ?? phone.e164 ?? ''),

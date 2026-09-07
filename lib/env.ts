@@ -54,7 +54,9 @@ export const env = {
 
   twilioSid: read('TWILIO_ACCOUNT_SID'),
   twilioToken: read('TWILIO_AUTH_TOKEN'),
-  twilioNumber: read('TWILIO_PHONE_NUMBER'),
+  /* TWILIO_NUMBER is accepted as an alias: it is the name people reach for,
+     and a caller-id set under it should not read as "Twilio not configured". */
+  twilioNumber: read('TWILIO_PHONE_NUMBER') || read('TWILIO_NUMBER'),
 
   cartesiaKey: read('CARTESIA_API_KEY'),
   deepgramKey: read('DEEPGRAM_API_KEY'),

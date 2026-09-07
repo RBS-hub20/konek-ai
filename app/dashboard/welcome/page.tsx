@@ -22,15 +22,22 @@ export default function WelcomePage() {
 
 type CallState = {
   status: string;
+  /* Twilio's state in words: "Your phone is ringing", "No answer", … */
+  label: string;
+  rang: boolean;
+  finished: boolean;
+  failed: boolean;
   ready: boolean;
   transcript: string | null;
   recordingUrl: string | null;
   durationSeconds: number;
+  failureReason?: string;
 };
 
 function Welcome() {
   const params = useSearchParams();
   const callId = params.get('callId');
+  const callToken = params.get('t');
   const businessName = params.get('name') || 'your business';
   const phone = params.get('phone') || '';
   const industry = params.get('industry') || '';
@@ -48,15 +55,17 @@ function Welcome() {
   const poll = useCallback(async () => {
     if (!callId) return true;
     try {
-      const res = await fetch(`/api/try-free-call/${callId}`, { cache: 'no-store' });
+      const q = callToken ? `?t=${encodeURIComponent(callToken)}` : '';
+      const res = await fetch(`/api/try-free-call/${callId}${q}`, { cache: 'no-store' });
       if (!res.ok) return false;
       const body = (await res.json()) as CallState;
       setCall(body);
-      return body.ready;
+      /* Stop once Twilio is done with it, however it ended. */
+      return body.finished || body.ready;
     } catch {
       return false;
     }
-  }, [callId]);
+  }, [callId, callToken]);
 
   /* The recording and transcript only exist once Twilio posts the call back,
      so this polls rather than blocking the page on it. */
@@ -91,13 +100,28 @@ function Welcome() {
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         >
           <span className="eyebrow">Your demo call</span>
+          {/* The page used to congratulate the visitor on a call that may
+              never have connected. It now says what actually happened. */}
           <h1 className="mt-5 font-display text-[34px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink sm:text-[42px]">
-            🎉 Cindy just called you!
+            {call?.failed
+              ? 'That call did not connect'
+              : call?.rang
+                ? '🎉 Cindy just called you!'
+                : 'Cindy is calling you now'}
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted">
-            That was Cindy on a real phone line, reading a real script, at{' '}
-            <span className="text-ink">{phone || 'your number'}</span>. Every business on KONEK AI gets
-            the same voice — pointed at their own customers instead of a demo.
+            {call?.failed ? (
+              <>
+                {call.failureReason ?? 'The carrier would not put the call through.'} Nothing was
+                charged, and you can still set Cindy up below.
+              </>
+            ) : (
+              <>
+                Cindy is on a real phone line, reading a real script, at{' '}
+                <span className="text-ink">{phone || 'your number'}</span>. Every business on KONEK AI
+                gets the same voice — pointed at their own customers instead of a demo.
+              </>
+            )}
           </p>
         </motion.div>
 
@@ -174,13 +198,13 @@ function CallCard({ call, callId, waited }: { call: CallState | null; callId: st
             <Phone className="h-4 w-4 text-ink" />
           </span>
           <div>
-            <div className="text-[13px] font-medium text-ink">
-              {call?.status === 'Completed' ? 'Call finished' : call ? `Call ${call.status.toLowerCase()}` : 'Connecting…'}
-            </div>
+            <div className="text-[13px] font-medium text-ink">{call?.label ?? 'Connecting…'}</div>
             <div className="text-[12px] text-muted">
-              {call?.durationSeconds
-                ? `${call.durationSeconds}s on the line`
-                : 'Duration lands when the call ends'}
+              {call?.failureReason
+                ? call.failureReason
+                : call?.durationSeconds
+                  ? `${call.durationSeconds}s on the line`
+                  : 'Duration lands when the call ends'}
             </div>
           </div>
         </div>
@@ -201,8 +225,12 @@ function CallCard({ call, callId, waited }: { call: CallState | null; callId: st
           </>
         ) : (
           <span className="flex items-center gap-2 text-[12px] text-muted">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            {callId ? 'Recording appears here when the call ends' : 'No call to play'}
+            {!call?.finished && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {!callId
+              ? 'No call to play'
+              : call?.failed
+                ? 'Nothing to play — the call never connected'
+                : 'Recording appears here when the call ends'}
           </span>
         )}
       </div>
@@ -213,9 +241,11 @@ function CallCard({ call, callId, waited }: { call: CallState | null; callId: st
           <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{call.transcript}</p>
         ) : (
           <p className="mt-3 text-[13px] leading-relaxed text-muted">
-            {waited > 60
-              ? 'No transcript came back for this one — the call still happened, and the setup below is unaffected.'
-              : 'Writing up what was said…'}
+            {call?.failed
+              ? 'No transcript — there was no conversation to write up.'
+              : waited > 60
+                ? 'No transcript came back for this one. The setup below is unaffected.'
+                : 'Writing up what was said…'}
           </p>
         )}
       </div>
