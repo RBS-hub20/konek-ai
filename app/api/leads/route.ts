@@ -1,4 +1,5 @@
-import { createLead, deleteLead, listLeads, updateLead } from '@/lib/server/tenant';
+import { createLead, deleteLead, listLeads, listScripts, resolveScript, safe, updateLead } from '@/lib/server/tenant';
+import { buildOpenerLine, languageModeFor, speedFor } from '@/lib/voice/cindyReceptionist';
 import type { Lead } from '@/lib/types2';
 import { LEAD_DISPOSITIONS } from '@/lib/types2';
 import { normalizePhone, countryFromE164 } from '@/lib/server/phone';
@@ -12,8 +13,35 @@ export async function GET() {
   return handle(async () => {
     const leads = await listLeads();
     const by = (s: string) => leads.filter((l) => l.status === s).length;
+
+    /* Which script each lead would be called with, resolved once here rather
+       than guessed at in the table. The scripts are read once and ranked in
+       memory — one query, not one per lead. */
+    const scripts = await safe(() => listScripts(), []);
+    const withScript = leads.map((l) => {
+      const { script, reason } = resolveScript(scripts, l.industry, l.country);
+      if (!script) return { ...l, resolvedScript: null };
+      const mode = languageModeFor(script, l.country);
+      return {
+        ...l,
+        resolvedScript: {
+          id: script.id,
+          name: script.name,
+          speed: speedFor(script, mode),
+          emotion: script.voice_settings?.emotion ?? null,
+          /* Rendered for this lead, so the tooltip shows the words it will
+             actually say — including whether the contact clause survives. */
+          opener: buildOpenerLine({
+            script, company: l.company, contact: l.contact_person,
+            industry: l.industry, country: l.country,
+          }),
+          reason,
+        },
+      };
+    });
+
     return {
-      leads,
+      leads: withScript,
       stats: {
         total: leads.length,
         new: by('New'),

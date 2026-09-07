@@ -1331,9 +1331,20 @@ export async function setDefaultScript(id: string): Promise<OutboundScript | nul
  * country, then the same industry anywhere, then a generic one. Falling back
  * rather than failing means a lead in a new industry still gets called.
  */
-export async function pickScript(industry?: string | null, country?: string | null): Promise<OutboundScript | null> {
-  const all = (await safe(() => listScripts(), [])).filter((s) => s.is_active);
-  if (!all.length) return null;
+/**
+ * Which script a lead in this industry and country gets, and why.
+ *
+ * Split out from pickScript so the call list can show the same answer the
+ * dialer will act on. Computing it twice from two implementations is how
+ * the table starts promising one script and the call reads another.
+ */
+export function resolveScript(
+  all: OutboundScript[],
+  industry?: string | null,
+  country?: string | null
+): { script: OutboundScript | null; reason: 'match' | 'country-fallback' | 'any' | 'none' } {
+  const active = all.filter((s) => s.is_active);
+  if (!active.length) return { script: null, reason: 'none' };
   const ind = (industry ?? 'generic').toLowerCase();
   const ctry = (country ?? 'ALL').toUpperCase();
 
@@ -1349,18 +1360,24 @@ export async function pickScript(industry?: string | null, country?: string | nu
     return score;
   };
 
-  const ranked = all.map((s) => ({ s, score: rank(s) })).filter((r) => r.score >= 0)
+  const ranked = active.map((s) => ({ s, score: rank(s) })).filter((r) => r.score >= 0)
     .sort((a, b) => b.score - a.score);
-  if (ranked[0]) return ranked[0].s;
+  if (ranked[0]) return { script: ranked[0].s, reason: 'match' };
 
   /* Nothing matched the industry — a cafe with only laundry and restaurant
      scripts loaded. Any script for the right country still beats none at all,
      because "none" means the call falls back to the tenant's own receptionist
      prompt and stops sounding like an outbound call. */
-  const sameCountry = all.filter((s) => s.country === ctry);
+  const sameCountry = active.filter((s) => s.country === ctry);
   if (sameCountry.length) {
-    return sameCountry.find((s) => s.is_default) ?? sameCountry[0];
+    return { script: sameCountry.find((s) => s.is_default) ?? sameCountry[0], reason: 'country-fallback' };
   }
-  const anyCountry = all.filter((s) => s.country === 'ALL');
-  return anyCountry.find((s) => s.is_default) ?? anyCountry[0] ?? null;
+  const anyCountry = active.filter((s) => s.country === 'ALL');
+  const any = anyCountry.find((s) => s.is_default) ?? anyCountry[0] ?? null;
+  return { script: any, reason: any ? 'any' : 'none' };
+}
+
+export async function pickScript(industry?: string | null, country?: string | null): Promise<OutboundScript | null> {
+  const all = await safe(() => listScripts(), []);
+  return resolveScript(all, industry, country).script;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Download, Loader2, Pause, Play, Plus, Star, Trash2 } from 'lucide-react';
+import { Copy, Download, Loader2, Pause, Phone, Play, Plus, Star, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
@@ -9,8 +9,10 @@ import { Switch } from '@/components/ui/Switch';
 import { api, tryApi } from '@/lib/apiClient';
 import {
   DEFAULT_VOICE_SETTINGS, stepText, SCRIPT_COUNTRIES, SCRIPT_INDUSTRIES, SCRIPT_STEPS,
-  SCRIPT_VIBES, renderScript, type OutboundScript, type ScriptStep,
+  SCRIPT_VIBES, renderScript, type Lead, type OutboundScript, type ScriptStep,
 } from '@/lib/types2';
+import { PhoneInput } from '@/components/ui/PhoneInput';
+import type { PhoneValue } from '@/components/ui/phoneTypes';
 import { cn } from '@/lib/utils';
 
 /* What the preview fills the variables with, so a line reads like a real call. */
@@ -39,9 +41,16 @@ const blankScript = (): Partial<OutboundScript> => ({
  * script — which is exactly what it did.
  */
 export function ScriptStudio({
-  onActiveScriptChange,
+  onActiveScriptChange, leads = [], onCallLead, unpinToken = 0,
 }: {
   onActiveScriptChange?: (script: OutboundScript | null, explicit: boolean) => void;
+  /** The pipeline, so a script can be tested without scrolling to find it. */
+  leads?: Lead[];
+  /** Saves happen first, then this dials — the script under test is the one
+      that gets read, which is the whole point of the button. */
+  onCallLead?: (lead: Lead, script: OutboundScript) => void;
+  /** Bumped by the call list's Unpin, which clears the open script. */
+  unpinToken?: number;
 } = {}) {
   const [scripts, setScripts] = useState<OutboundScript[]>([]);
   const [editing, setEditing] = useState<Partial<OutboundScript> | null>(null);
@@ -50,6 +59,10 @@ export function ScriptStudio({
   const [notice, setNotice] = useState<string | null>(null);
   const [filterIndustry, setFilterIndustry] = useState('all');
   const [filterVibe, setFilterVibe] = useState('all');
+  /* Save & Call: which lead, and a number typed in on the spot. */
+  const [callTarget, setCallTarget] = useState('');
+  const [customPhone, setCustomPhone] = useState<PhoneValue>({ e164: null, country: 'PH', valid: false });
+  const [calling, setCalling] = useState(false);
   /* Which step is generating or playing, so each row can show its own state. */
   const [busyStep, setBusyStep] = useState<string | null>(null);
   const [playingStep, setPlayingStep] = useState<string | null>(null);
@@ -177,8 +190,44 @@ export function ScriptStudio({
     }
   };
 
+  /* The call list asked to go back to per-lead matching. */
+  useEffect(() => { if (unpinToken > 0) setEditing(null); }, [unpinToken]);
+
   /* A built-in is the product's, not the operator's: copy it to change it. */
   const locked = editing?.is_builtin === true;
+
+  /**
+   * Save, then dial — in that order, because the point of the button is to
+   * hear the script that was just edited, not the one on the server.
+   */
+  const saveAndCall = async () => {
+    if (!onCallLead || !callTarget) return;
+    setCalling(true); setNotice(null);
+    try {
+      /* A built-in cannot be saved, and does not need to be. */
+      const script = locked && editing?.id
+        ? (scripts.find((s) => s.id === editing.id) ?? null)
+        : (await api.saveScript({ ...editing })).script;
+      if (!script) { setNotice('Save the script first.'); return; }
+      if (!locked) { setEditing(script); await load(); }
+
+      let lead: Lead | null = null;
+      if (callTarget === '__custom__') {
+        if (!customPhone.valid || !customPhone.e164) { setNotice('That number is not dialable yet.'); return; }
+        const created = await api.testLead(customPhone.e164, customPhone.country, `Script test — ${script.name}`);
+        lead = created.leads[0] ?? null;
+      } else {
+        lead = leads.find((l) => l.id === callTarget) ?? null;
+      }
+      if (!lead) { setNotice('Pick a lead to call.'); return; }
+
+      onCallLead(lead, script);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not place the call');
+    } finally {
+      setCalling(false);
+    }
+  };
 
   const setStep = (name: string, patch: Partial<ScriptStep>) => {
     if (!editing) return;
@@ -243,11 +292,28 @@ export function ScriptStudio({
             <ul className="divide-y divide-line">
               {shown.map((s) => (
                 <li key={s.id}>
-                  <div className={cn('px-4 py-3 transition-colors', editing?.id === s.id && 'bg-surface')}>
+                  <div className={cn(
+                    'border-l-2 px-4 py-3 transition-colors',
+                    /* The starred script wins ties inside auto-pick, so it is
+                       worth being able to see which one that is at a glance. */
+                    s.is_default ? 'border-l-amber-400' : 'border-l-transparent',
+                    editing?.id === s.id && 'bg-surface'
+                  )}>
                     <button type="button" onClick={() => setEditing(s)} className="w-full text-left focus-ring">
                       <div className="flex items-center gap-2">
-                        {s.is_default && <Star className="h-3 w-3 shrink-0 fill-accent text-accent" />}
+                        {s.is_default && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                         <span className="truncate text-[13px] font-medium text-ink">{s.name}</span>
+                        {s.is_default && (
+                          <span
+                            /* Default is scoped: each industry+country has its
+                               own, so the label says which rather than reading
+                               as "the" default for everything. */
+                            title={`The default for ${s.industry} ${s.country} — it wins ties inside auto-pick for that industry and country.`}
+                            className="shrink-0 rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500"
+                          >
+                            default · {s.industry} {s.country}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {s.is_builtin ? <Badge tone="accent">built-in</Badge> : <Badge>custom</Badge>}
@@ -470,6 +536,54 @@ export function ScriptStudio({
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Close</Button>
               </div>
+
+              {/* Save & Call. Separate row because it is the only control here
+                  that spends money and rings somebody's phone. */}
+              {onCallLead && (
+                <div className="rounded-brand border border-line bg-surface p-4">
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-3.5 w-3.5 text-accent" />
+                    <span className="text-[13px] font-medium text-ink">Test this script on a real call</span>
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                    Saves first, then dials with <span className="text-ink">this</span> script — not the
+                    one matched to the lead&rsquo;s industry. Close above saves nothing and calls nobody.
+                  </p>
+
+                  <div className="mt-3.5 flex flex-wrap items-end gap-2">
+                    <div className="min-w-[240px] flex-1">
+                      <Field label="Call">
+                        <Select value={callTarget} onChange={(e) => setCallTarget(e.target.value)}>
+                          <option value="">Pick a lead…</option>
+                          {leads.slice(0, 3).map((l) => (
+                            <option key={l.id} value={l.id}>
+                              {l.company ?? l.phone} — {l.phone}
+                              {l.industry ? ` · ${l.industry}` : ''}{l.country ? ` ${l.country}` : ''}
+                            </option>
+                          ))}
+                          <option value="__custom__">A number I type…</option>
+                        </Select>
+                      </Field>
+                    </div>
+                    {callTarget === '__custom__' && (
+                      <div className="min-w-[220px] flex-1">
+                        <Field label="Number">
+                          <PhoneInput value={customPhone} onChange={setCustomPhone} />
+                        </Field>
+                      </div>
+                    )}
+                    <Button
+                      size="sm" className="gap-1.5"
+                      disabled={calling || !callTarget || (callTarget === '__custom__' && !customPhone.valid)}
+                      onClick={() => void saveAndCall()}
+                    >
+                      {calling
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                        : <><Phone className="h-3.5 w-3.5" /> Save &amp; Call</>}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

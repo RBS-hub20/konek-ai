@@ -70,9 +70,14 @@ export async function POST(req: Request) {
     /* The country decides the script, which decides the language and the
        pace. A Manila number hears Taglish from the first word. */
     const script = await safe<OutboundScript | null>(() => pickScript(industry, country), null);
-    const language = country === 'PH' ? 'TAGLISH' : 'EN';
     const mode = languageModeFor(script, country);
     const speed = script ? speedFor(script, mode) : null;
+    /* The script's own language mode wins — a country fallback can hand a PH
+       cafe a script written in English, and the call must open in the language
+       the script is actually written in. */
+    const language = script
+      ? (mode === 'PH-direct' ? 'TAGLISH' : 'EN')
+      : country === 'PH' ? 'TAGLISH' : 'EN';
 
     const opener = buildOpenerLine({
       script, company: businessName, contact: null, industry, country,

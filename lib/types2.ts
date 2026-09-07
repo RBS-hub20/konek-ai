@@ -184,6 +184,20 @@ export interface OverviewStats {
 
 /* ── Outbound sales ─────────────────────────────────────────────── */
 
+/** Which script a lead would be called with, resolved by the server. */
+export interface ResolvedScript {
+  id: string;
+  name: string;
+  speed: number;
+  emotion: string | null;
+  /** The opening line rendered for this lead, contact clause and all. */
+  opener: string;
+  /** How it was chosen: an industry+country match, or a fallback. */
+  reason: 'match' | 'country-fallback' | 'any' | 'none';
+}
+
+export type LeadWithScript = Lead & { resolvedScript: ResolvedScript | null };
+
 /* What a caller marks a lead as when the call ends. Hot is the one the
    Overview counts — it is the reason the dialer exists. */
 export const LEAD_DISPOSITIONS = ['Hot', 'Interested', 'Callback', 'Not interested'] as const;

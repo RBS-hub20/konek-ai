@@ -1,7 +1,7 @@
 'use client';
 
 import type {
-  Lead, OutboundScript, SalesSettings, Service,
+  Lead, LeadWithScript, OutboundScript, SalesSettings, Service,
   Business, BusinessBrain, CallLog, Campaign, Contact,
   KnowledgeFile, OverviewStats, SkillRecord,
 } from './types2';
@@ -73,14 +73,14 @@ export const api = {
   dbHealth: () => req<Record<string, unknown>>('/api/db/health'),
 
   /* Outbound sales */
-  leads: () => req<{ leads: Lead[]; stats: Record<string, number> }>('/api/leads'),
+  leads: () => req<{ leads: LeadWithScript[]; stats: Record<string, number> }>('/api/leads'),
   addLead: (input: Partial<Lead>) =>
     req<{ leads: Lead[]; created: number }>('/api/leads', { method: 'POST', body: JSON.stringify(input) }),
   updateLead: (id: string, patch: Partial<Lead>) =>
     req<{ lead: Lead }>('/api/leads', { method: 'PATCH', body: JSON.stringify({ id, ...patch }) }),
   deleteLead: (id: string) => req<{ deleted: string }>(`/api/leads?id=${id}`, { method: 'DELETE' }),
   /* scriptId is the script open in Script Studio — the call reads that one. */
-  callLead: (leadId: string, scriptId?: string | null) =>
+  callLead: (leadId: string, scriptId?: string | null, via?: string) =>
     req<{
       success: boolean; twilioSid: string | null; to: string; language: string;
       script: { id: string; name: string; speed: number | null } | null;
@@ -89,7 +89,22 @@ export const api = {
       callId: string | null; callToken: string | null; opener?: string;
       callerId?: { from: string; source: string; fallback: boolean } | null;
       callerWarning?: string;
-    }>('/api/super-admin/call-lead', { method: 'POST', body: JSON.stringify({ leadId, scriptId: scriptId ?? null }) }),
+    }>('/api/super-admin/call-lead', {
+      method: 'POST',
+      body: JSON.stringify({ leadId, scriptId: scriptId ?? null, via: via ?? null }),
+    }),
+  /* A number typed into Script Studio to test a script. It becomes a real
+     lead so the call records, transcribes and dispositions like any other. */
+  testLead: (phone: string, country: string, label?: string) =>
+    req<{ leads: Lead[]; created: number }>('/api/leads', {
+      method: 'POST',
+      body: JSON.stringify({
+        phone, country,
+        company: label?.trim() || 'Script test',
+        source: 'script-test',
+        status: 'New',
+      }),
+    }),
   importLeads: (csv: string, country?: string | null) =>
     req<{ created: number; skipped: number; details: { row: number; value: string; why: string }[]; leads: Lead[] }>(
       '/api/leads/import', { method: 'POST', body: JSON.stringify({ csv, country: country ?? null }) }

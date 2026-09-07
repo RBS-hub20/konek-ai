@@ -43,11 +43,13 @@ interface Dialled {
 }
 
 export function PowerDialer({
-  lead, scriptId, onClose, onSaved,
+  lead, scriptId, pinnedScriptName = null, onClose, onSaved,
 }: {
   lead: Lead;
   /** The script chosen in Script Studio; null lets the server pick. */
   scriptId: string | null;
+  /** Set when that choice overrides the lead's own industry and country. */
+  pinnedScriptName?: string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -66,7 +68,7 @@ export function PowerDialer({
     let alive = true;
     void (async () => {
       try {
-        const res = await api.callLead(lead.id, scriptId);
+        const res = await api.callLead(lead.id, scriptId, scriptId ? 'Script Studio' : undefined);
         if (!alive) return;
         setDialled(res as unknown as Dialled);
       } catch (err) {
@@ -155,6 +157,11 @@ export function PowerDialer({
                 </h2>
               </div>
               <p className="mt-1 font-mono text-[12px] text-muted">{dialled?.to ?? lead.phone}</p>
+              {pinnedScriptName && (
+                <p className="mt-2 text-[11px] leading-relaxed text-accent">
+                  Calling with: {pinnedScriptName} (this script) — overrides the industry auto-pick.
+                </p>
+              )}
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 {dialled?.script && <Badge tone="accent">{dialled.script.name}</Badge>}
                 {dialled?.script?.speed && <Badge>speed {dialled.script.speed}</Badge>}

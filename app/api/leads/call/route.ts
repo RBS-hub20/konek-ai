@@ -33,9 +33,12 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = await readJson<{ leadId?: string; scriptId?: string | null; script_id?: string | null }>(req);
+  const body = await readJson<{
+    leadId?: string; scriptId?: string | null; script_id?: string | null; via?: string;
+  }>(req);
   if (!body?.leadId) return fail('leadId is required');
   const chosenScriptId = (body.scriptId ?? body.script_id ?? null)?.trim() || null;
+  const via = body.via?.trim() || null;
 
   try {
     const lead = await getLead(body.leadId);
@@ -51,11 +54,6 @@ export async function POST(req: Request) {
     if (hasTwilio && !caller) return fail('No outbound number configured.', 400);
     const from = caller?.from ?? null;
     const callerWarning = caller ? callerIdWarning(caller, lead.country) : null;
-
-    /* Country decides the language Cindy opens in. */
-    const language = lead.country === 'AE' || lead.country === 'SA' || lead.country === 'QA'
-      ? 'EN'
-      : lead.country === 'PH' ? 'TAGLISH' : 'EN';
 
     /* A written opener read at a steady pace is far easier to follow on a
        phone line than one the model improvises. */
@@ -74,6 +72,20 @@ export async function POST(req: Request) {
 
     const mode = languageModeFor(script, lead.country);
     const speed = script ? speedFor(script, mode) : null;
+
+    /* The script decides the language, not the lead's country. Reading a Gulf
+       English script while the call opens in Taglish is the mismatch you get
+       when an explicitly chosen script overrides the country but the language
+       still follows it. With no script, the country decides as before. */
+    const language = script
+      ? (mode === 'PH-direct' ? 'TAGLISH' : 'EN')
+      : lead.country === 'PH' ? 'TAGLISH' : 'EN';
+    if (scriptSource === 'selected') {
+      console.log(
+        `[OutboundSales] Calling lead ${lead.company ?? lead.phone} with explicit script ` +
+        `${script?.name}${via ? ` (from ${via})` : ''}`
+      );
+    }
     console.log(
       '[Outbound] Super Admin call - using script:', script?.name ?? '(none — business default)',
       'speed:', speed, 'country:', lead.country, 'source:', scriptSource
