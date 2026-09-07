@@ -15,6 +15,9 @@ import { cn } from '@/lib/utils';
 
 /* What the preview fills the variables with, so a line reads like a real call. */
 const SAMPLE = { company: 'Bubbles Laundry', contact: 'Maria', industry: 'laundry' };
+/* Most imported lists have a business name and no contact person, so the
+   preview has to show that reading too — it is where "Si po ba" came from. */
+const SAMPLE_NO_CONTACT = { ...SAMPLE, contact: '' };
 
 const blankScript = (): Partial<OutboundScript> => ({
   name: '',
@@ -28,14 +31,17 @@ const blankScript = (): Partial<OutboundScript> => ({
 });
 
 /**
- * onActiveScriptChange reports which saved script is open in the editor, so
- * the page above can dial with it. An unsaved draft reports null — there is
- * nothing for the call to read yet.
+ * onActiveScriptChange reports which saved script is open in the editor.
+ *
+ * `explicit` says whether the operator actually picked it. That matters: a
+ * chosen script wins over the lead's own industry and country, so reporting
+ * the library's default as a choice would call an AE gym with the PH laundry
+ * script — which is exactly what it did.
  */
 export function ScriptStudio({
   onActiveScriptChange,
 }: {
-  onActiveScriptChange?: (script: OutboundScript | null) => void;
+  onActiveScriptChange?: (script: OutboundScript | null, explicit: boolean) => void;
 } = {}) {
   const [scripts, setScripts] = useState<OutboundScript[]>([]);
   const [editing, setEditing] = useState<Partial<OutboundScript> | null>(null);
@@ -49,6 +55,8 @@ export function ScriptStudio({
   const [playingStep, setPlayingStep] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
+  /* Which reading of the script the previews show. */
+  const [withContact, setWithContact] = useState(true);
 
   const seed = async () => {
     setSeeding(true); setNotice(null);
@@ -76,12 +84,12 @@ export function ScriptStudio({
   useEffect(() => {
     if (!onActiveScriptChange) return;
     if (editing?.id) {
-      onActiveScriptChange(scripts.find((s) => s.id === editing.id) ?? (editing as OutboundScript));
+      onActiveScriptChange(scripts.find((s) => s.id === editing.id) ?? (editing as OutboundScript), true);
       return;
     }
-    if (editing) { onActiveScriptChange(null); return; }
+    if (editing) { onActiveScriptChange(null, false); return; }
     const active = scripts.filter((s) => s.is_active !== false);
-    onActiveScriptChange(active.find((s) => s.is_default) ?? active[0] ?? null);
+    onActiveScriptChange(active.find((s) => s.is_default) ?? active[0] ?? null, false);
   }, [editing, scripts, onActiveScriptChange]);
 
   const shown = scripts.filter(
@@ -356,11 +364,39 @@ export function ScriptStudio({
               </div>
 
               {/* Steps */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-brand border border-line bg-surface px-4 py-3">
+                <div className="text-[12px] text-muted">
+                  Preview as a lead{' '}
+                  <span className="text-ink">{withContact ? 'with a contact name' : 'with no contact name'}</span>.
+                  Wrap an optional clause in <span className="font-mono text-ink">[[ ]]</span> and it drops when the
+                  name is missing.
+                </div>
+                <div className="inline-flex rounded-brand border border-line bg-paper p-1">
+                  {[true, false].map((v) => (
+                    <button
+                      key={String(v)}
+                      type="button"
+                      aria-pressed={withContact === v}
+                      onClick={() => setWithContact(v)}
+                      className={cn(
+                        'rounded-[9px] px-3 py-1.5 text-[11px] font-medium transition-colors focus-ring',
+                        withContact === v ? 'bg-surface text-ink' : 'text-muted hover:text-ink'
+                      )}
+                    >
+                      {v ? 'With “Maria”' : 'No contact'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-4">
                 {SCRIPT_STEPS.map((name) => {
                   const step = editing.script_steps?.find((s) => s.step === name)
                     ?? { step: name, text: '', pause_ms: 400 };
-                  const preview = renderScript(stepText(step, editing.country), SAMPLE);
+                  const preview = renderScript(
+                    stepText(step, editing.country),
+                    withContact ? SAMPLE : SAMPLE_NO_CONTACT
+                  );
                   return (
                     <div key={name} className="rounded-brand border border-line p-4">
                       <div className="flex items-center justify-between gap-3">

@@ -182,8 +182,13 @@ export interface OverviewStats {
 
 /* ── Outbound sales ─────────────────────────────────────────────── */
 
+/* What a caller marks a lead as when the call ends. Hot is the one the
+   Overview counts — it is the reason the dialer exists. */
+export const LEAD_DISPOSITIONS = ['Hot', 'Interested', 'Callback', 'Not interested'] as const;
+export type LeadDisposition = (typeof LEAD_DISPOSITIONS)[number];
+
 export const LEAD_STATUSES = [
-  'New', 'Calling', 'Interested', 'Transferred', 'Not interested', 'No answer', 'Closed',
+  'New', 'Calling', ...LEAD_DISPOSITIONS, 'Transferred', 'No answer', 'Closed',
 ] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -202,8 +207,18 @@ export interface Lead {
   twilio_sid: string | null;
   /** Came in through Try Free Call rather than the sales console. */
   is_trial: boolean;
+  /* ── Outbound sales desk ─────────────────────────────────────── */
+  /** Where the lead came from: google | fb | csv | manual. */
+  source: string | null;
+  /** The script Cindy calls this lead with, when one was chosen. */
+  script_id: string | null;
+  /** The last call placed to this lead, for playback and transcript. */
+  last_call_id: string | null;
+  next_follow_up_at: string | null;
+  disposition_at: string | null;
   created_at: string;
 }
+
 
 export interface SalesSettings {
   manager_number: string | null;

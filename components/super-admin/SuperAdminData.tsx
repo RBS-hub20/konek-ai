@@ -12,6 +12,7 @@ export interface Stats {
   mrr: number; active: number; total: number; totalRows?: number;
   callsUsed: number; totalCalls: number; connectedCalls?: number;
   answeredSeconds?: number; hotLeads: number;
+  interestedLeads?: number; callsToday?: number; dialledToday?: number;
 }
 
 export interface SchemaHealth {

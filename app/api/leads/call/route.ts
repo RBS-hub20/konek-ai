@@ -4,6 +4,9 @@ import { buildOpenerLine, languageModeFor, speedFor } from '@/lib/voice/cindyRec
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
 import { guardCall } from '@/lib/server/operator';
 import { normalizePhone } from '@/lib/server/phone';
+import { callerIdFor, callerIdWarning } from '@/lib/server/callerId';
+import { signTrialCall } from '@/lib/server/trialToken';
+import { explainTwilioFailure } from '@/lib/server/twilioStatus';
 import { describeError, fail, ok, readJson } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
@@ -41,8 +44,12 @@ export async function POST(req: Request) {
     if (!n.valid || !n.e164) return fail(n.reason ?? `Lead phone "${lead.phone}" is not valid.`);
     const phone = n.e164;
     const { business } = await getBusinessForRead(null);
-    const from = business.outbound_number?.trim() || env.twilioNumber;
-    if (hasTwilio && !from) return fail('No outbound number configured.', 400);
+    /* The sales desk calls other people's countries, so a local caller id
+       wins over the tenant's own number. */
+    const caller = callerIdFor(lead.country, business.outbound_number);
+    if (hasTwilio && !caller) return fail('No outbound number configured.', 400);
+    const from = caller?.from ?? null;
+    const callerWarning = caller ? callerIdWarning(caller, lead.country) : null;
 
     /* Country decides the language Cindy opens in. */
     const language = lead.country === 'AE' || lead.country === 'SA' || lead.country === 'QA'
@@ -92,21 +99,38 @@ export async function POST(req: Request) {
             scriptId: script?.id ?? null, opener, speed,
             industry: lead.industry, country: lead.country,
           }),
+          /* So the desk can play back how Cindy actually sounded, the same
+             way the demo call can. */
+          record: true,
+          recordingStatusCallback: `${env.appUrl}/api/call/recording`,
+          recordingStatusCallbackEvent: ['completed'],
+          recordingStatusCallbackMethod: 'POST',
           statusCallback: `${env.appUrl}/api/call/transcript`,
-          statusCallbackEvent: ['initiated', 'answered', 'completed'],
+          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
         });
         twilioSid = call.sid;
+        console.log(
+          `[Outbound] Twilio call created: ${call.sid} to ${phone} from ${from} ` +
+          `(${caller?.source}, ${lead.country ?? 'unknown country'}, recording on)`
+        );
+        if (callerWarning) console.warn(`[Outbound] ${callerWarning}`);
       } catch (err) {
         const t = err as { message?: string; code?: number | string };
-        await safe(() => updateLead(lead.id, { status: 'No answer' }), null);
+        const code = typeof t.code === 'string' ? Number(t.code) : t.code ?? null;
+        console.error(`[Outbound] Twilio refused the call to ${phone}: ${t.message} (code ${t.code})`);
+        await safe(() => updateLead(lead.id, {
+          status: 'No answer',
+          notes: `Twilio refused: ${t.message ?? 'unknown'} (code ${t.code ?? 'none'})`,
+        }), null);
         return Response.json(
           {
             success: false,
             error: 'Twilio rejected the call',
             twilioError: t.message,
             twilioCode: t.code ?? null,
-            hint: twilioHint(t.code, lead.country),
+            hint: twilioHint(t.code, lead.country)
+              ?? explainTwilioFailure(Number.isFinite(code) ? (code as number) : null, phone),
           },
           { status: 502 }
         );
@@ -120,6 +144,7 @@ export async function POST(req: Request) {
       call_count: (lead.call_count ?? 0) + 1,
       last_called_at: new Date().toISOString(),
       twilio_sid: twilioSid,
+      script_id: script?.id ?? null,
     });
 
     /* One row per dial, so the transcript callback has something to update and
@@ -136,6 +161,8 @@ export async function POST(req: Request) {
       twilio_sid: twilioSid,
     });
     if (logged.error) console.warn('[Outbound] call not logged:', logged.error);
+    /* The dialer follows this id to the transcript and the recording. */
+    if (logged.id) await safe(() => updateLead(lead.id, { last_call_id: logged.id }), null);
 
     return ok(
       {
@@ -147,6 +174,11 @@ export async function POST(req: Request) {
         language,
         script: script ? { id: script.id, name: script.name, speed } : null,
         scriptSource,
+        /* What the dialer polls, and its proof of ownership for playback. */
+        callId: logged.id,
+        callToken: logged.id ? signTrialCall(logged.id) : null,
+        callerId: caller ? { from: caller.from, source: caller.source, fallback: caller.fallback } : null,
+        ...(callerWarning ? { callerWarning } : {}),
         opener,
         mode: hasMediaBridge ? 'conversation' : 'opener-only',
         ...(warning ? { warning } : {}),

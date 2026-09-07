@@ -1087,6 +1087,11 @@ const normalizeLead = (r: Record<string, unknown>): Lead => ({
   last_called_at: (r.last_called_at as string) ?? null,
   twilio_sid: (r.twilio_sid as string) ?? null,
   is_trial: r.is_trial === true,
+  source: (r.source as string) ?? null,
+  script_id: (r.script_id as string) ?? null,
+  last_call_id: (r.last_call_id as string) ?? null,
+  next_follow_up_at: (r.next_follow_up_at as string) ?? null,
+  disposition_at: (r.disposition_at as string) ?? null,
   created_at: (r.created_at as string) ?? nowIso(),
 });
 
@@ -1117,6 +1122,8 @@ export async function createLead(input: Partial<Lead>): Promise<Lead> {
     notes: input.notes ?? null,
     call_count: 0,
     is_trial: input.is_trial ?? false,
+    source: input.source ?? 'manual',
+    script_id: input.script_id ?? null,
   };
   if (!hasSupabase) {
     const created = normalizeLead({ ...row, id: uuid(), created_at: nowIso() });
@@ -1134,7 +1141,8 @@ export async function createLead(input: Partial<Lead>): Promise<Lead> {
 
 export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
   const allowed = ['company', 'contact_person', 'name', 'phone', 'industry', 'country',
-    'status', 'notes', 'call_count', 'last_called_at', 'twilio_sid', 'is_trial'] as const;
+    'status', 'notes', 'call_count', 'last_called_at', 'twilio_sid', 'is_trial',
+    'source', 'script_id', 'last_call_id', 'next_follow_up_at', 'disposition_at'] as const;
   const clean: Record<string, unknown> = {};
   for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
 

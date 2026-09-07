@@ -86,7 +86,14 @@ export const api = {
       script: { id: string; name: string; speed: number | null } | null;
       scriptSource: 'selected' | 'auto';
       warning?: string;
-    }>('/api/leads/call', { method: 'POST', body: JSON.stringify({ leadId, scriptId: scriptId ?? null }) }),
+      callId: string | null; callToken: string | null; opener?: string;
+      callerId?: { from: string; source: string; fallback: boolean } | null;
+      callerWarning?: string;
+    }>('/api/super-admin/call-lead', { method: 'POST', body: JSON.stringify({ leadId, scriptId: scriptId ?? null }) }),
+  importLeads: (csv: string, country?: string | null) =>
+    req<{ created: number; skipped: number; details: { row: number; value: string; why: string }[]; leads: Lead[] }>(
+      '/api/leads/import', { method: 'POST', body: JSON.stringify({ csv, country: country ?? null }) }
+    ),
   salesSettings: () => req<{ sales: SalesSettings }>('/api/platform/sales'),
   saveSalesSettings: (patch: Partial<SalesSettings>) =>
     req<{ sales: SalesSettings }>('/api/platform/sales', { method: 'POST', body: JSON.stringify(patch) }),

@@ -1,4 +1,4 @@
-import { createBusiness, getBusiness, listBusinesses, listCallLogs, safe, updateBusiness } from '@/lib/server/tenant';
+import { createBusiness, getBusiness, listBusinesses, listCallLogs, listLeads, safe, updateBusiness } from '@/lib/server/tenant';
 import type { Business } from '@/lib/types2';
 import { fail, handle, ok, readJson, describeError } from '@/lib/server/http';
 
@@ -17,6 +17,9 @@ export async function GET(req: Request) {
     /* Either table may not exist yet; the console should still render. */
     const businesses = await safe(() => listBusinesses(), []);
     const allCalls = await safe(() => listCallLogs(null, 500), []);
+    /* Hot Leads is the sales desk's number, so it comes from the pipeline
+       rather than from a call status nothing ever set. */
+    const leads = await safe(() => listLeads(1000), []);
 
     /* Totals are computed over distinct tenants. Two rows for the same
        business would otherwise double the MRR, which is how $49 read as $98. */
@@ -48,7 +51,11 @@ export async function GET(req: Request) {
         totalCalls: allCalls.length,
         connectedCalls: connected.length,
         answeredSeconds: allCalls.reduce((s, c) => s + (c.duration_seconds ?? 0), 0),
-        hotLeads: allCalls.filter((c) => c.status === 'Hot Lead').length,
+        hotLeads: leads.filter((l) => l.status === 'Hot').length
+          + leads.filter((l) => l.is_trial && l.status === 'Interested').length,
+        interestedLeads: leads.filter((l) => l.status === 'Interested').length,
+        callsToday: allCalls.filter((c) => isToday(c.created_at)).length,
+        dialledToday: leads.filter((l) => isToday(l.last_called_at)).length,
       },
       recentCalls: allCalls.slice(0, 20),
     };
@@ -79,4 +86,13 @@ export async function PATCH(req: Request) {
   } catch (err) {
     return fail('Could not update business', 500, describeError(err).detail);
   }
+}
+
+function isToday(iso: string | null): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
 }

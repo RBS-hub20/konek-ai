@@ -158,6 +158,17 @@ alter table leads add column if not exists call_count     int default 0;
 alter table leads add column if not exists twilio_sid     text;
 alter table leads add column if not exists is_trial       boolean default false;  -- came from Try Free Call
 
+-- The outbound sales desk. leads is the pipeline for both the trial funnel and
+-- the dialer; a second table would fork the stats and the dialer with it.
+alter table leads add column if not exists source             text;         -- google | fb | csv | manual
+alter table leads add column if not exists script_id          uuid;         -- the script this lead is called with
+alter table leads add column if not exists last_call_id       uuid;         -- call_logs row, for playback
+alter table leads add column if not exists next_follow_up_at  timestamptz;  -- set by a Callback disposition
+alter table leads add column if not exists disposition_at     timestamptz;  -- when it was last dispositioned
+
+create index if not exists leads_followup_idx on leads (next_follow_up_at)
+  where next_follow_up_at is not null;
+
 -- One free call per phone per day is enforced by reading this back.
 create index if not exists leads_trial_phone_idx on leads (phone, created_at desc) where is_trial;
 

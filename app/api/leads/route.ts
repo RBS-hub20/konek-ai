@@ -1,5 +1,6 @@
 import { createLead, deleteLead, listLeads, updateLead } from '@/lib/server/tenant';
 import type { Lead } from '@/lib/types2';
+import { LEAD_DISPOSITIONS } from '@/lib/types2';
 import { normalizePhone, countryFromE164 } from '@/lib/server/phone';
 import { describeError, fail, handle, ok, readJson } from '@/lib/server/http';
 
@@ -17,9 +18,17 @@ export async function GET() {
         total: leads.length,
         new: by('New'),
         interested: by('Interested'),
+        hot: by('Hot'),
+        callback: by('Callback'),
+        notInterested: by('Not interested'),
         transferred: by('Transferred'),
         closed: by('Closed'),
         called: leads.filter((l) => l.call_count > 0).length,
+        /* What the desk has dialled since midnight, local to the server. */
+        dialledToday: leads.filter((l) => isToday(l.last_called_at)).length,
+        dueFollowUp: leads.filter(
+          (l) => l.next_follow_up_at && new Date(l.next_follow_up_at).getTime() <= Date.now()
+        ).length,
       },
     };
   });
@@ -55,6 +64,11 @@ export async function PATCH(req: Request) {
   const body = await readJson<Partial<Lead> & { id?: string }>(req);
   if (!body?.id) return fail('id is required');
   const { id, ...patch } = body;
+  /* A disposition is a moment, not just a status — the follow-up list and
+     "dialled today" both read the timestamp. */
+  if (patch.status && (LEAD_DISPOSITIONS as readonly string[]).includes(patch.status)) {
+    patch.disposition_at = new Date().toISOString();
+  }
   try {
     const lead = await updateLead(id, patch);
     if (!lead) return fail('Lead not found', 404);
@@ -74,4 +88,13 @@ export async function DELETE(req: Request) {
   } catch (err) {
     return fail('Could not delete lead', 500, describeError(err).detail);
   }
+}
+
+function isToday(iso: string | null): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
 }

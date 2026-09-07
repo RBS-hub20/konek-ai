@@ -1,5 +1,6 @@
 import { getCallLog, updateCallLog, safe } from '@/lib/server/tenant';
 import { verifyTrialCall } from '@/lib/server/trialToken';
+import { SESSION_COOKIE, verifySession } from '@/lib/superAdminAuth';
 import { explainTwilioFailure, fetchRecordingUrl, fetchTwilioCall } from '@/lib/server/twilioStatus';
 import { fail, ok, describeError } from '@/lib/server/http';
 
@@ -42,9 +43,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const call = await getCallLog(id);
     if (!call) return fail('That call is not available.', 404);
 
-    /* The token proves this browser asked for the call. is_trial is still
-       honoured for links issued before tokens existed. */
-    if (!verifyTrialCall(id, token) && !call.is_trial) {
+    /* Three ways in: the token issued with this callId, the is_trial flag on
+       links from before tokens existed, or a super admin session — the sales
+       desk plays back calls it never held a token for. */
+    if (!verifyTrialCall(id, token) && !call.is_trial && !(await isSuperAdmin(req))) {
       return fail('That call is not available.', 404);
     }
 
@@ -95,4 +97,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   } catch (err) {
     return fail('Could not read that call', 500, describeError(err).detail);
   }
+}
+
+/** The console's own session, so the call feed can open any call. */
+async function isSuperAdmin(req: Request): Promise<boolean> {
+  const cookie = req.headers.get('cookie') ?? '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  return match ? await verifySession(decodeURIComponent(match[1])) : false;
 }

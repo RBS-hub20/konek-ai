@@ -1,5 +1,6 @@
 import { getCallLog, updateCallLog, safe } from '@/lib/server/tenant';
 import { verifyTrialCall } from '@/lib/server/trialToken';
+import { SESSION_COOKIE, verifySession } from '@/lib/superAdminAuth';
 import { fetchRecordingAudio, fetchRecordingUrl } from '@/lib/server/twilioStatus';
 import { fail } from '@/lib/server/http';
 
@@ -24,7 +25,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const call = await safe(() => getCallLog(id), null);
   if (!call) return fail('That call is not available.', 404);
-  if (!verifyTrialCall(id, token) && !call.is_trial) return fail('That call is not available.', 404);
+  /* Same three ways in as the status route. */
+  if (!verifyTrialCall(id, token) && !call.is_trial && !(await isSuperAdmin(req))) {
+    return fail('That call is not available.', 404);
+  }
 
   /* Prefer what the callback stored; ask Twilio when it never arrived. */
   let url = call.recording_url;
@@ -45,4 +49,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       'Cache-Control': 'private, max-age=3600',
     },
   });
+}
+
+async function isSuperAdmin(req: Request): Promise<boolean> {
+  const cookie = req.headers.get('cookie') ?? '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  return match ? await verifySession(decodeURIComponent(match[1])) : false;
 }

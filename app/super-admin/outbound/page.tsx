@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Megaphone, Phone, Plus, Trash2 } from 'lucide-react';
+import { Flame, Megaphone, Phone, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/ui/StatCard';
@@ -10,8 +10,9 @@ import { PhoneInput } from '@/components/ui/PhoneInput';
 import type { PhoneValue } from '@/components/ui/phoneTypes';
 import { UnlockDialog } from '@/components/admin/UnlockDialog';
 import { ScriptStudio } from '@/components/super-admin/ScriptStudio';
+import { PowerDialer } from '@/components/super-admin/PowerDialer';
+import { LeadImport } from '@/components/super-admin/LeadImport';
 import { api, tryApi } from '@/lib/apiClient';
-import { needsUnlock } from '@/lib/store';
 import { DEFAULT_VOICE_SETTINGS, type Lead, type OutboundScript, type SalesSettings } from '@/lib/types2';
 import { cn } from '@/lib/utils';
 
@@ -29,7 +30,9 @@ const COUNTRIES = [
 ];
 
 const statusTone = (s: string) =>
-  s === 'Transferred' ? 'success'
+  s === 'Hot' ? 'warning'
+  : s === 'Callback' ? 'accent'
+  : s === 'Transferred' ? 'success'
   : s === 'Interested' ? 'accent'
   : s === 'Calling' ? 'warning'
   : s === 'Closed' ? 'success'
@@ -41,13 +44,22 @@ export default function OutboundPage() {
   const [sales, setSales] = useState<SalesSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  const [calling, setCalling] = useState<string | null>(null);
   const [showUnlock, setShowUnlock] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
   /* Whatever is open in Script Studio is what the call reads — the operator
      set the call up here, so this script wins over the tenant's own. */
   const [script, setScript] = useState<OutboundScript | null>(null);
+  /* Only a script the operator actually opened overrides the per-lead pick. */
+  const [scriptPinned, setScriptPinned] = useState(false);
+
+  /* The desk works a list, so it needs to cut the list down. */
+  const [search, setSearch] = useState('');
+  const [country, setCountry] = useState('all');
+  const [industry, setIndustry] = useState('all');
+  const [importing, setImporting] = useState(false);
+  /* The lead currently on the phone. */
+  const [dialing, setDialing] = useState<Lead | null>(null);
 
   const [form, setForm] = useState({ company: '', contact_person: '', industry: 'Laundry' });
   /* Same component the test-call dialog uses, so the number is already E.164
@@ -87,20 +99,22 @@ export default function OutboundPage() {
     }
   };
 
-  const call = async (id: string) => {
-    setCalling(id); setNotice(null);
-    try {
-      const res = await api.callLead(id, script?.id ?? null);
-      const using = res.script ? ` Reading “${res.script.name}” at ${res.script.speed ?? '—'}.` : '';
-      setNotice((res.warning ?? `Cindy is calling ${res.to} in ${res.language}.`) + using);
-      await load();
-    } catch (err) {
-      if (needsUnlock(err)) { setPending(id); setShowUnlock(true); }
-      else setNotice(err instanceof Error ? err.message : 'Call failed');
-    } finally {
-      setCalling(null);
-    }
-  };
+  /* Dialling, listening and dispositioning all happen in one place now, so
+     the button opens the dialer rather than firing a call into the dark. */
+  const call = (lead: Lead) => { setNotice(null); setDialing(lead); };
+
+  const shown = leads.filter((l) => {
+    if (filter && l.status !== filter) return false;
+    if (country !== 'all' && (l.country ?? '') !== country) return false;
+    if (industry !== 'all' && (l.industry ?? '') !== industry) return false;
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return [l.company, l.contact_person, l.phone, l.industry, l.notes]
+      .some((v) => (v ?? '').toLowerCase().includes(q));
+  });
+
+  const industries = Array.from(new Set(leads.map((l) => l.industry).filter(Boolean) as string[])).sort();
+  const countries = Array.from(new Set(leads.map((l) => l.country).filter(Boolean) as string[])).sort();
 
   const ready = Boolean(sales?.manager_number);
 
@@ -132,12 +146,18 @@ export default function OutboundPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Leads" value={String(stats.total ?? 0)} delta={`${stats.new ?? 0} not yet called`} />
-        <StatCard label="Called" value={String(stats.called ?? 0)} delta="Cindy has dialled" icon={<Phone className="h-4 w-4" />} />
+        <StatCard
+          label="Dialled today"
+          value={String(stats.dialledToday ?? 0)}
+          delta={`${stats.called ?? 0} ever · ${stats.dueFollowUp ?? 0} follow-up due`}
+          icon={<Phone className="h-4 w-4" />}
+        />
         <StatCard label="Interested" value={String(stats.interested ?? 0)} delta="Showed buying intent" accent />
         <StatCard
-          label="Transferred"
-          value={String(stats.transferred ?? 0)}
-          delta={stats.called ? `${Math.round(((stats.transferred ?? 0) / stats.called) * 100)}% of calls` : 'No calls yet'}
+          label="Hot leads"
+          value={String(stats.hot ?? 0)}
+          delta={stats.called ? `${Math.round(((stats.hot ?? 0) / stats.called) * 100)}% of calls` : 'No calls yet'}
+          icon={<Flame className="h-4 w-4" />}
         />
       </div>
 
@@ -145,9 +165,11 @@ export default function OutboundPage() {
 
       <Funnel leads={leads} active={filter} onPick={setFilter} />
 
-      <CallingWith script={script} />
+      <CallingWith script={script} pinned={scriptPinned} />
 
-      <ScriptStudio onActiveScriptChange={setScript} />
+      <ScriptStudio
+        onActiveScriptChange={(s, explicit) => { setScript(s); setScriptPinned(explicit); }}
+      />
 
       {/* Add lead */}
       <section className="rounded-brand border border-line bg-paper p-5">
@@ -179,22 +201,61 @@ export default function OutboundPage() {
 
       {/* Pipeline */}
       <section className="overflow-hidden rounded-brand border border-line bg-paper">
-        <div className="border-b border-line px-5 py-4">
-          <h2 className="font-display text-[14px] font-semibold text-ink">Pipeline</h2>
-          <p className="mt-0.5 text-[12px] text-muted">
-            {filter ? `${leads.filter((l) => l.status === filter).length} ${filter}` : `${leads.length} lead${leads.length === 1 ? '' : 's'}`}
-            {filter && (
-              <button type="button" onClick={() => setFilter(null)} className="ml-2 text-accent hover:underline">
-                show all
-              </button>
-            )}
-          </p>
+        <div className="space-y-4 border-b border-line px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-display text-[14px] font-semibold text-ink">Call list</h2>
+              <p className="mt-0.5 text-[12px] text-muted">
+                {shown.length} of {leads.length} lead{leads.length === 1 ? '' : 's'}
+                {(filter || country !== 'all' || industry !== 'all' || search) && (
+                  <button
+                    type="button"
+                    onClick={() => { setFilter(null); setCountry('all'); setIndustry('all'); setSearch(''); }}
+                    className="ml-2 text-accent hover:underline"
+                  >
+                    clear filters
+                  </button>
+                )}
+              </p>
+            </div>
+            <Button size="sm" variant="secondary" className="gap-1.5" onClick={() => setImporting(true)}>
+              <Upload className="h-3.5 w-3.5" /> Import CSV
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search business, contact, number…"
+                className="h-9 pl-9"
+              />
+            </div>
+            <Select value={country} onChange={(e) => setCountry(e.target.value)} className="h-9 w-auto">
+              <option value="all">All countries</option>
+              {countries.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <Select value={industry} onChange={(e) => setIndustry(e.target.value)} className="h-9 w-auto">
+              <option value="all">All industries</option>
+              {industries.map((i) => <option key={i} value={i}>{i}</option>)}
+            </Select>
+            <Select value={filter ?? 'all'} onChange={(e) => setFilter(e.target.value === 'all' ? null : e.target.value)} className="h-9 w-auto">
+              <option value="all">All statuses</option>
+              {STAGES.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+            </Select>
+          </div>
         </div>
 
         {loading ? (
           <p className="px-5 py-10 text-center text-[13px] text-muted">Loading…</p>
-        ) : leads.length === 0 ? (
-          <p className="px-5 py-12 text-center text-[13px] text-muted">No leads yet. Add one above and press Call.</p>
+        ) : shown.length === 0 ? (
+          <p className="px-5 py-12 text-center text-[13px] text-muted">
+            {leads.length === 0
+              ? 'No leads yet. Add one above, or import a list.'
+              : 'Nothing matches these filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-left">
@@ -210,20 +271,39 @@ export default function OutboundPage() {
                 </tr>
               </thead>
               <tbody>
-                {leads.filter((l) => !filter || l.status === filter).map((l) => (
+                {shown.map((l) => (
                   <tr key={l.id} className="border-b border-line last:border-0 hover:bg-surface">
                     <td className="px-5 py-4 text-[13px] font-medium text-ink">{l.company ?? '—'}</td>
                     <td className="px-5 py-4 text-[13px] text-muted">{l.contact_person ?? '—'}</td>
                     <td className="px-5 py-4 font-mono text-[12px] text-muted">
                       {COUNTRIES.find((c) => c.code === l.country)?.label.split(' ')[0] ?? ''} {l.phone}
                     </td>
-                    <td className="px-5 py-4 text-[12px] text-muted">{l.industry ?? '—'}</td>
-                    <td className="px-5 py-4"><Badge tone={statusTone(l.status)}>{l.status}</Badge></td>
-                    <td className="px-5 py-4 text-[12px] tabular-nums text-muted">{l.call_count}</td>
+                    <td className="px-5 py-4 text-[12px] text-muted">
+                      {l.industry ?? '—'}
+                      {l.source && l.source !== 'manual' && (
+                        <span className="ml-1.5 text-[11px] text-muted/70">· {l.source}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <Badge tone={statusTone(l.status)}>{l.status === 'Hot' ? '🔥 Hot' : l.status}</Badge>
+                      {l.next_follow_up_at && (
+                        <div className="mt-1 text-[11px] text-muted">
+                          back {new Date(l.next_follow_up_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4 text-[12px] tabular-nums text-muted">
+                      {l.call_count}
+                      {l.last_called_at && (
+                        <div className="text-[11px] text-muted/70">
+                          {new Date(l.last_called_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        <Button size="sm" disabled={calling === l.id} onClick={() => void call(l.id)} className={cn(calling === l.id && 'opacity-60')}>
-                          {calling === l.id ? 'Calling…' : 'Call'}
+                        <Button size="sm" className="gap-1.5" onClick={() => call(l)}>
+                          <Phone className="h-3.5 w-3.5" /> Call now
                         </Button>
                         <button
                           type="button" aria-label={`Delete ${l.company}`}
@@ -242,10 +322,23 @@ export default function OutboundPage() {
         )}
       </section>
 
+      {dialing && (
+        <PowerDialer
+          lead={dialing}
+          scriptId={scriptPinned ? script?.id ?? null : null}
+          onClose={() => setDialing(null)}
+          onSaved={() => { void load(); }}
+        />
+      )}
+
+      {importing && (
+        <LeadImport onClose={() => setImporting(false)} onImported={() => { void load(); }} />
+      )}
+
       <UnlockDialog
         open={showUnlock}
         onClose={() => setShowUnlock(false)}
-        onUnlocked={() => { if (pending) void call(pending); setPending(null); }}
+        onUnlocked={() => { setShowUnlock(false); setPending(null); }}
       />
     </div>
   );
@@ -255,24 +348,34 @@ export default function OutboundPage() {
 
 /* The bug this answers: the script on screen and the script the call read
    were not the same one, and nothing on the page said so. */
-function CallingWith({ script }: { script: OutboundScript | null }) {
+function CallingWith({ script, pinned }: { script: OutboundScript | null; pinned: boolean }) {
   const speed = script?.voice_settings?.speed ?? DEFAULT_VOICE_SETTINGS.speed;
-  return (
-    <section className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-brand border border-line bg-surface px-4 py-3 text-[12px]">
-      <Megaphone className="h-3.5 w-3.5 shrink-0 text-muted" />
-      <span className="text-muted">Calling with:</span>
-      {script ? (
-        <>
-          <span className="font-medium text-ink">{script.name}</span>
-          {script.is_builtin && <Badge tone="accent">built-in</Badge>}
-          <Badge>{script.country}</Badge>
-          <span className="tabular-nums text-muted">speed {speed}</span>
-        </>
-      ) : (
+
+  /* Nothing opened in the editor means each lead gets the best match for its
+     own industry and country, which is what a mixed list needs. */
+  if (!pinned) {
+    return (
+      <section className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-brand border border-line bg-surface px-4 py-3 text-[12px]">
+        <Megaphone className="h-3.5 w-3.5 shrink-0 text-muted" />
+        <span className="text-muted">Calling with:</span>
+        <span className="font-medium text-ink">the best script for each lead</span>
         <span className="text-muted">
-          nothing picked — Cindy falls back to the best match for each lead&rsquo;s industry and country.
+          — matched on industry and country{script ? `, default ${script.name}` : ''}. Open a script
+          below to use that one for every call instead.
         </span>
-      )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-brand border border-accent/40 bg-accent/[0.05] px-4 py-3 text-[12px]">
+      <Megaphone className="h-3.5 w-3.5 shrink-0 text-accent" />
+      <span className="text-muted">Calling every lead with:</span>
+      <span className="font-medium text-ink">{script?.name}</span>
+      {script?.is_builtin && <Badge tone="accent">built-in</Badge>}
+      {script?.country && <Badge>{script.country}</Badge>}
+      <span className="tabular-nums text-muted">speed {speed}</span>
+      <span className="text-muted">— overrides each lead&rsquo;s own industry and country.</span>
     </section>
   );
 }
@@ -285,6 +388,8 @@ const STAGES: { key: string; label: string; className: string }[] = [
   { key: 'New', label: 'New', className: 'bg-line text-muted' },
   { key: 'Calling', label: 'Calling', className: 'bg-amber-500/15 text-amber-500' },
   { key: 'Interested', label: 'Interested', className: 'bg-accent/15 text-accent' },
+  { key: 'Hot', label: 'Hot', className: 'bg-amber-500/20 text-amber-500' },
+  { key: 'Callback', label: 'Callback', className: 'bg-accent/10 text-accent' },
   { key: 'Transferred', label: 'Transferred', className: 'bg-emerald-500/15 text-emerald-500' },
   { key: 'Closed', label: 'Closed', className: 'bg-amber-400/20 text-amber-400' },
   { key: 'Not interested', label: 'Not interested', className: 'bg-line text-muted' },
