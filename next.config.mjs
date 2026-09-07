@@ -25,6 +25,9 @@ const nextConfig = {
   async redirects() {
     return [
       { source: '/super-admin', destination: '/super-admin/overview', permanent: false },
+      /* The funnel says /dashboard; the tenant console has always lived at
+         /admin. One redirect keeps both names working. */
+      { source: '/dashboard', destination: '/admin', permanent: false },
     ];
   },
 

@@ -35,7 +35,7 @@ export const BUILTIN_SCRIPTS: SeedScript[] = [
       {
         step: 'opener',
         pause_ms: 500,
-        text: 'Good morning po. Si Cindy po from Konek A I. Si {{contact}} po ba from {{company}}? May thirty seconds lang po ba kayo?',
+        text: 'Good morning po. Si Cindy po from Konek A I.[[ Si {{contact}} po ba?]] Para po ito sa {{company}}. May thirty seconds lang po ba kayo?',
         text_ph: '',
         text_ae: '',
       },
@@ -81,7 +81,7 @@ export const BUILTIN_SCRIPTS: SeedScript[] = [
       {
         step: 'opener',
         pause_ms: 500,
-        text: 'Good morning po. Si Cindy po from Konek A I. Si {{contact}} po ba from {{company}}? May thirty seconds lang po ba?',
+        text: 'Good morning po. Si Cindy po from Konek A I.[[ Si {{contact}} po ba?]] Para po ito sa {{company}}. May thirty seconds lang po ba?',
         text_ph: '', text_ae: '',
       },
       {
@@ -123,7 +123,7 @@ export const BUILTIN_SCRIPTS: SeedScript[] = [
       {
         step: 'opener',
         pause_ms: 400,
-        text: 'Good morning, this is Cindy from Konek A I. Am I speaking with {{contact}} from {{company}}? Do you have thirty seconds?',
+        text: 'Good morning, this is Cindy from Konek A I.[[ Am I speaking with {{contact}}?]] I am calling about {{company}}. Do you have thirty seconds?',
         text_ph: '', text_ae: '',
       },
       {

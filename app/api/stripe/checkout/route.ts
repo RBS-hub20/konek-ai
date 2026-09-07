@@ -13,20 +13,26 @@ const PLANS = {
 type PlanId = keyof typeof PLANS;
 
 /**
- * POST /api/stripe/checkout — { plan: 'starter' | 'pro', businessId?, email? }
+ * POST /api/stripe/checkout — { plan: 'starter' | 'pro', interval?, businessId?, email? }
  * Returns a Checkout URL. Without STRIPE_SECRET_KEY it returns a mock URL so
  * the upgrade flow is still clickable.
  */
 export async function POST(req: Request) {
-  const body = await readJson<{ plan?: string; businessId?: string; email?: string }>(req);
+  const body = await readJson<{ plan?: string; interval?: string; businessId?: string; email?: string }>(req);
   const planId = (body?.plan ?? 'pro') as PlanId;
   const plan = PLANS[planId];
   if (!plan) return fail(`Unknown plan "${planId}". Use starter or pro.`);
+
+  /* Yearly is ten months' money for twelve months' service, so it is a
+     different amount rather than the monthly figure times twelve. */
+  const yearly = body?.interval === 'yearly';
+  const amount = yearly ? plan.amount * 10 : plan.amount;
 
   if (!hasStripe) {
     return ok({
       mock: true,
       plan: planId,
+      interval: yearly ? 'yearly' : 'monthly',
       url: `/admin?checkout=mock&plan=${planId}`,
       note: 'No STRIPE_SECRET_KEY — returning a mock checkout URL.',
     });
@@ -43,11 +49,13 @@ export async function POST(req: Request) {
           quantity: 1,
           price_data: {
             currency: 'usd',
-            unit_amount: plan.amount,
-            recurring: { interval: 'month' },
+            unit_amount: amount,
+            recurring: { interval: yearly ? 'year' : 'month' },
             product_data: {
               name: plan.name,
-              description: `${plan.calls.toLocaleString()} calls per month`,
+              description: yearly
+                ? `${plan.calls.toLocaleString()} calls per month · 2 months free`
+                : `${plan.calls.toLocaleString()} calls per month`,
             },
           },
         },
@@ -55,10 +63,10 @@ export async function POST(req: Request) {
       success_url: `${env.appUrl}/admin?checkout=success&plan=${planId}`,
       cancel_url: `${env.appUrl}/admin?checkout=cancelled`,
       ...(body?.email ? { customer_email: body.email } : {}),
-      metadata: { plan: planId, businessId: body?.businessId ?? '' },
+      metadata: { plan: planId, interval: yearly ? 'yearly' : 'monthly', businessId: body?.businessId ?? '' },
     });
 
-    return ok({ mock: false, plan: planId, url: session.url, sessionId: session.id });
+    return ok({ mock: false, plan: planId, interval: yearly ? 'yearly' : 'monthly', url: session.url, sessionId: session.id });
   } catch (err) {
     return fail('Could not create checkout session', 500, describeError(err).detail);
   }

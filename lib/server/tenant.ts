@@ -65,6 +65,12 @@ function mem(): Mem {
         hours: null,
         logo_url: null,
         onboarded_at: null,
+        trial_started_at: null,
+        trial_ends_at: null,
+        subscription_status: 'none',
+        billing_interval: 'monthly',
+        trial_phone: null,
+        trial_call_id: null,
         settings: { whatsapp_followup: true, sms_fallback: true },
         created_at: nowIso(),
       }],
@@ -117,6 +123,12 @@ const normalizeBusiness = (b: Record<string, unknown>): Business => ({
   hours: (b.hours as string) ?? null,
   logo_url: (b.logo_url as string) ?? null,
   onboarded_at: (b.onboarded_at as string) ?? null,
+  trial_started_at: (b.trial_started_at as string) ?? null,
+  trial_ends_at: (b.trial_ends_at as string) ?? null,
+  subscription_status: (b.subscription_status as string) ?? 'none',
+  billing_interval: (b.billing_interval as string) ?? 'monthly',
+  trial_phone: (b.trial_phone as string) ?? null,
+  trial_call_id: (b.trial_call_id as string) ?? null,
   settings: (b.settings as Business['settings']) ?? {},
   created_at: (b.created_at as string) ?? nowIso(),
 });
@@ -148,6 +160,8 @@ export async function updateBusiness(id: string, patch: Partial<Business>): Prom
     'calls_used', 'calls_limit', 'status', 'mrr', 'active_vibe', 'language', 'auto_language',
     'handoff_number', 'handoff_backup', 'handoff_enabled', 'handoff_mode',
     'industry', 'address', 'city', 'country', 'hours', 'logo_url', 'onboarded_at',
+    'trial_started_at', 'trial_ends_at', 'subscription_status', 'billing_interval',
+    'trial_phone', 'trial_call_id',
     'settings',
   ] as const;
   const clean: Record<string, unknown> = {};
@@ -160,8 +174,19 @@ export async function updateBusiness(id: string, patch: Partial<Business>): Prom
     m.businesses[i] = { ...m.businesses[i], ...(clean as Partial<Business>) };
     return m.businesses[i];
   }
-  const { data, error } = await db().from('businesses').update(clean).eq('id', id).select().single();
+  /* The trial columns are new. Dropping what the table does not have yet beats
+     failing the whole save — the same reason every other write here is
+     resilient. */
+  const { data, dropped, error } = await updateResilient<Record<string, unknown>>(
+    db(), 'businesses', { id }, clean
+  );
   if (error) throw error;
+  if (dropped.length) console.warn('[business] columns missing, not saved:', dropped.join(', '));
+  if (!data) {
+    const again = await getBusiness(id);
+    if (!again) throw new Error('Business not found');
+    return again;
+  }
   return normalizeBusiness(data);
 }
 
@@ -191,6 +216,12 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     hours: input.hours ?? null,
     logo_url: input.logo_url ?? null,
     onboarded_at: input.onboarded_at ?? null,
+    trial_started_at: input.trial_started_at ?? null,
+    trial_ends_at: input.trial_ends_at ?? null,
+    subscription_status: input.subscription_status ?? 'none',
+    billing_interval: input.billing_interval ?? 'monthly',
+    trial_phone: input.trial_phone ?? null,
+    trial_call_id: input.trial_call_id ?? null,
     settings: input.settings ?? { whatsapp_followup: true, sms_fallback: true },
   };
   if (!hasSupabase) {
@@ -544,6 +575,7 @@ const normalizeCall = (r: Record<string, unknown>): CallLog => ({
   transcript: (r.transcript as string) ?? null,
   twilio_sid: (r.twilio_sid as string) ?? null,
   script_id: (r.script_id as string) ?? null,
+  is_trial: r.is_trial === true,
   created_at: (r.created_at as string) ?? nowIso(),
 });
 
@@ -577,6 +609,7 @@ export async function createCallLog(input: Partial<CallLog>): Promise<CallLog> {
     transcript: input.transcript ?? null,
     twilio_sid: input.twilio_sid ?? null,
     script_id: input.script_id ?? null,
+    is_trial: input.is_trial ?? false,
   };
   if (!hasSupabase) {
     const created = normalizeCall({ ...row, id: uuid(), created_at: nowIso() });
@@ -597,6 +630,13 @@ export async function updateCallLog(id: string, patch: Partial<CallLog>): Promis
     return m.callLogs[i];
   }
   const { data, error } = await db().from('call_logs').update(patch).eq('id', id).select().maybeSingle();
+  if (error) throw error;
+  return data ? normalizeCall(data) : null;
+}
+
+export async function getCallLog(id: string): Promise<CallLog | null> {
+  if (!hasSupabase) return mem().callLogs.find((c) => c.id === id) ?? null;
+  const { data, error } = await db().from('call_logs').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   return data ? normalizeCall(data) : null;
 }
@@ -815,6 +855,12 @@ function fallbackBusiness(): Business {
     hours: null,
     logo_url: null,
     onboarded_at: null,
+    trial_started_at: null,
+    trial_ends_at: null,
+    subscription_status: 'none',
+    billing_interval: 'monthly',
+    trial_phone: null,
+    trial_call_id: null,
     settings: { whatsapp_followup: true, sms_fallback: true },
     created_at: nowIso(),
   };
@@ -968,6 +1014,8 @@ export async function logCall(row: {
   twilio_sid?: string | null;
   /* Which outbound script Cindy read, when the call was set up with one. */
   script_id?: string | null;
+  /* A Try Free Call demo rather than a tenant's own call. */
+  is_trial?: boolean;
 }): Promise<{ id: string | null; dropped: string[]; error: string | null }> {
   if (!hasSupabase) {
     const created = await createCallLog({
@@ -982,6 +1030,7 @@ export async function logCall(row: {
       skills_used: row.skills_used ?? [],
       twilio_sid: row.twilio_sid ?? null,
       script_id: row.script_id ?? null,
+      is_trial: row.is_trial ?? false,
     });
     return { id: created.id, dropped: [], error: null };
   }
@@ -1007,6 +1056,7 @@ export async function logCall(row: {
       duration_seconds: 0,
       twilio_sid: row.twilio_sid ?? null,
       script_id: row.script_id ?? null,
+      is_trial: row.is_trial ?? false,
     }
   );
 
@@ -1036,6 +1086,7 @@ const normalizeLead = (r: Record<string, unknown>): Lead => ({
   call_count: Number(r.call_count ?? 0),
   last_called_at: (r.last_called_at as string) ?? null,
   twilio_sid: (r.twilio_sid as string) ?? null,
+  is_trial: r.is_trial === true,
   created_at: (r.created_at as string) ?? nowIso(),
 });
 
@@ -1065,6 +1116,7 @@ export async function createLead(input: Partial<Lead>): Promise<Lead> {
     status: input.status ?? 'New',
     notes: input.notes ?? null,
     call_count: 0,
+    is_trial: input.is_trial ?? false,
   };
   if (!hasSupabase) {
     const created = normalizeLead({ ...row, id: uuid(), created_at: nowIso() });
@@ -1082,7 +1134,7 @@ export async function createLead(input: Partial<Lead>): Promise<Lead> {
 
 export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
   const allowed = ['company', 'contact_person', 'name', 'phone', 'industry', 'country',
-    'status', 'notes', 'call_count', 'last_called_at', 'twilio_sid'] as const;
+    'status', 'notes', 'call_count', 'last_called_at', 'twilio_sid', 'is_trial'] as const;
   const clean: Record<string, unknown> = {};
   for (const k of allowed) if (k in patch && patch[k] !== undefined) clean[k] = patch[k];
 
@@ -1260,5 +1312,16 @@ export async function pickScript(industry?: string | null, country?: string | nu
 
   const ranked = all.map((s) => ({ s, score: rank(s) })).filter((r) => r.score >= 0)
     .sort((a, b) => b.score - a.score);
-  return ranked[0]?.s ?? null;
+  if (ranked[0]) return ranked[0].s;
+
+  /* Nothing matched the industry — a cafe with only laundry and restaurant
+     scripts loaded. Any script for the right country still beats none at all,
+     because "none" means the call falls back to the tenant's own receptionist
+     prompt and stops sounding like an outbound call. */
+  const sameCountry = all.filter((s) => s.country === ctry);
+  if (sameCountry.length) {
+    return sameCountry.find((s) => s.is_default) ?? sameCountry[0];
+  }
+  const anyCountry = all.filter((s) => s.country === 'ALL');
+  return anyCountry.find((s) => s.is_default) ?? anyCountry[0] ?? null;
 }

@@ -65,6 +65,18 @@ alter table businesses add column if not exists status          text default 'ac
 alter table businesses add column if not exists mrr             int  default 0;
 alter table businesses add column if not exists settings        jsonb default '{"whatsapp_followup": true, "sms_fallback": true}'::jsonb;
 
+-- The Keep Cindy funnel. plan/status say nothing about money: every tenant is
+-- created on "starter"/"active", so a separate column carries whether anyone
+-- has actually paid.
+alter table businesses add column if not exists trial_started_at    timestamptz;
+alter table businesses add column if not exists trial_ends_at       timestamptz;
+alter table businesses add column if not exists subscription_status text default 'none';
+  -- none | trialing | active | canceled
+alter table businesses add column if not exists billing_interval    text default 'monthly';
+  -- monthly | yearly
+alter table businesses add column if not exists trial_phone         text;   -- who took the free call
+alter table businesses add column if not exists trial_call_id       uuid;   -- the call that hooked them
+
 -- v1 declared owner_email NOT NULL, which blocks auto-creating a tenant.
 alter table businesses alter column owner_email drop not null;
 
@@ -144,6 +156,10 @@ alter table leads add column if not exists country        text;
 alter table leads add column if not exists last_called_at timestamptz;
 alter table leads add column if not exists call_count     int default 0;
 alter table leads add column if not exists twilio_sid     text;
+alter table leads add column if not exists is_trial       boolean default false;  -- came from Try Free Call
+
+-- One free call per phone per day is enforced by reading this back.
+create index if not exists leads_trial_phone_idx on leads (phone, created_at desc) where is_trial;
 
 create index if not exists leads_status_idx on leads (status, created_at desc);
 
@@ -226,6 +242,7 @@ alter table call_logs add column if not exists twilio_sid       text;
 alter table call_logs add column if not exists transferred_to   text;
 alter table call_logs add column if not exists transfer_status  text;   -- requested | connected | no_answer | failed
 alter table call_logs add column if not exists script_id        uuid;   -- which script Cindy read
+alter table call_logs add column if not exists is_trial         boolean default false;  -- a Try Free Call demo
 
 create unique index if not exists call_logs_twilio_sid_key on call_logs (twilio_sid) where twilio_sid is not null;
 

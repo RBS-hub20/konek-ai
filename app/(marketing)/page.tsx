@@ -1,8 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { ArrowRight, Check, Play } from 'lucide-react';
+import { ArrowRight, Check, PhoneCall, Play } from 'lucide-react';
+import { TryFreeCallModal } from '@/components/marketing/TryFreeCallModal';
+import { PRICE_LINE } from '@/lib/trial';
 import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { Button } from '@/components/ui/Button';
@@ -18,8 +21,13 @@ const fadeUp = {
 };
 
 export default function LandingPage() {
+  /* Try Free Call opens the modal; Get Started goes to setup. Both used to
+     land on the dashboard, which skipped the only moment that sells this. */
+  const [tryOpen, setTryOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-paper">
+      <TryFreeCallModal open={tryOpen} onClose={() => setTryOpen(false)} />
       {/* ── Navigation ─────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-line bg-paper/85 backdrop-blur-md">
         <div className="shell flex h-16 items-center justify-between">
@@ -36,7 +44,7 @@ export default function LandingPage() {
             <Link href="/admin" className="hidden sm:block">
               <Button variant="ghost" size="sm">Login</Button>
             </Link>
-            <Link href="/admin">
+            <Link href="/dashboard/onboarding">
               <Button size="sm">Get Started</Button>
             </Link>
           </div>
@@ -60,12 +68,13 @@ export default function LandingPage() {
             One Platform. Any Business. Any Vibe. Upload your business, KONEK AI calls your
             customers on a real phone number.
           </p>
-          <div className="mt-9 flex flex-wrap items-center gap-3">
-            <Link href="/admin">
-              <Button size="lg" className="gap-2">
-                Try Free Call <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+          <p className="mt-7 text-[13px] font-medium text-ink">
+            {PRICE_LINE}
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <Button size="lg" className="gap-2" onClick={() => setTryOpen(true)}>
+              <PhoneCall className="h-4 w-4" /> Try Free Call
+            </Button>
             <Button variant="secondary" size="lg" className="gap-2">
               <Play className="h-3.5 w-3.5" /> Watch 30s Demo
             </Button>
@@ -226,7 +235,7 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <Link href="/admin" className="mt-9">
+                <Link href="/dashboard/onboarding" className="mt-9">
                   <Button variant={p.highlight ? 'primary' : 'secondary'} className="w-full">
                     {p.cta}
                   </Button>
@@ -246,12 +255,22 @@ export default function LandingPage() {
           >
             Your customers are waiting for a call.
           </motion.h2>
-          <motion.div {...fadeUp} transition={{ ...fadeUp.transition, delay: 0.08 }}>
-            <Link href="/admin">
-              <Button size="lg" className="gap-2">
-                Try Free Call <ArrowRight className="h-4 w-4" />
+          <motion.div
+            {...fadeUp}
+            transition={{ ...fadeUp.transition, delay: 0.08 }}
+            className="flex flex-col items-center gap-4"
+          >
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Button size="lg" className="gap-2" onClick={() => setTryOpen(true)}>
+                <PhoneCall className="h-4 w-4" /> Try Free Call
               </Button>
-            </Link>
+              <Link href="/dashboard/onboarding">
+                <Button variant="secondary" size="lg" className="gap-2">
+                  Get Started <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
+            <p className="text-[12px] text-muted">{PRICE_LINE}</p>
           </motion.div>
         </div>
       </section>

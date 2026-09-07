@@ -70,6 +70,15 @@ export interface Business {
   logo_url: string | null;
   /** Null until the onboarding wizard is finished. */
   onboarded_at: string | null;
+  /* ── Keep Cindy ──────────────────────────────────────────────── */
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
+  /** none | trialing | active | canceled — the only signal that money moved. */
+  subscription_status: string;
+  billing_interval: string;
+  /** The phone that took the free call, and the call itself. */
+  trial_phone: string | null;
+  trial_call_id: string | null;
   settings: BusinessSettings;
   created_at: string;
 }
@@ -138,6 +147,8 @@ export interface CallLog {
   twilio_sid: string | null;
   /** The outbound script Cindy read, when the call was set up with one. */
   script_id: string | null;
+  /** A Try Free Call demo rather than a tenant's own call. */
+  is_trial: boolean;
   created_at: string;
 }
 
@@ -189,6 +200,8 @@ export interface Lead {
   call_count: number;
   last_called_at: string | null;
   twilio_sid: string | null;
+  /** Came in through Try Free Call rather than the sales console. */
+  is_trial: boolean;
   created_at: string;
 }
 
@@ -254,8 +267,27 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { speed: 0.92, emotion: 'pr
 
 /** Fills {{company}}, {{contact}} and {{industry}} in a script line. */
 export function renderScript(text: string, vars: Record<string, string | null | undefined>): string {
-  return String(text ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => {
+  const value = (key: string) => {
     const v = vars[key];
-    return v ? String(v) : '';
-  }).replace(/\s{2,}/g, ' ').trim();
+    return v ? String(v).trim() : '';
+  };
+
+  /* [[ ... ]] marks a clause that only makes sense when its variables are
+     known. An outbound lead often has a company but no contact person, and
+     "Si {{contact}} po ba" with nothing to put in it says "Si po ba" down a
+     live phone line. The whole clause drops instead. */
+  const withOptional = String(text ?? '').replace(/\[\[([\s\S]*?)\]\]/g, (_, inner: string) => {
+    const names = Array.from(inner.matchAll(/\{\{\s*(\w+)\s*\}\}/g)).map((m) => m[1]);
+    if (names.length && names.some((n) => !value(n))) return '';
+    return inner;
+  });
+
+  return withOptional
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key: string) => value(key))
+    /* A dropped clause can leave a doubled space or a stranded punctuation
+       mark; neither should reach the voice. */
+    .replace(/\s+([,.?!])/g, '$1')
+    .replace(/([,.?!])\1+/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }

@@ -12,6 +12,7 @@ import {
   Settings as SettingsIcon,
   Sparkles,
   Megaphone,
+  Sparkle,
   X,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
@@ -25,6 +26,8 @@ import { VibeModeTab } from '@/components/admin/VibeModeTab';
 import { CallLogsTab } from '@/components/admin/CallLogsTab';
 import { IntegrationsTab } from '@/components/admin/IntegrationsTab';
 import { SettingsTab } from '@/components/admin/SettingsTab';
+import { BillingTab } from '@/components/admin/BillingTab';
+import { TrialBanner } from '@/components/admin/TrialBanner';
 import { useKonekStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +39,9 @@ const NAV = [
   { id: 'vibe', label: 'Vibe Mode', icon: Mic2 },
   { id: 'logs', label: 'Call Logs', icon: Phone },
   { id: 'integrations', label: 'Integrations', icon: Blocks },
+  /* Never labelled "Billing" or "Subscription" to the owner — they are
+     keeping a receptionist, not buying a plan. */
+  { id: 'billing', label: 'Keep Cindy', icon: Sparkle },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ] as const;
 
@@ -161,6 +167,7 @@ export default function AdminPage() {
         </header>
 
         <main className="flex-1 px-5 py-8 md:px-8 md:py-10">
+          <TrialBanner onGoBilling={() => setTab('billing')} />
           {loadError && (
             <div className="mb-6 rounded-brand border border-line bg-surface p-4 text-[13px] text-muted">
               {loadError}
@@ -173,6 +180,7 @@ export default function AdminPage() {
           {tab === 'vibe' && <VibeModeTab />}
           {tab === 'logs' && <CallLogsTab />}
           {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'billing' && <BillingTab />}
           {tab === 'settings' && <SettingsTab />}
         </main>
       </div>
