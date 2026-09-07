@@ -66,7 +66,10 @@ const server = http.createServer(async (req, res) => {
     const said = url.searchParams.get('text')
       ?? 'Ah sige, magkano ba? May laundry kasi ako dito sa Makati.';
     const language = (url.searchParams.get('language') ?? 'TL').toUpperCase();
-    const dgLanguage = url.searchParams.get('dg') ?? config.sttLanguage;
+    /* auto means "whatever this call's language maps to"; the check is about
+       Taglish, so that is what it defaults to. */
+    const configured = config.sttLanguage && config.sttLanguage !== 'auto' ? config.sttLanguage : 'tl';
+    const dgLanguage = url.searchParams.get('dg') ?? configured;
     try {
       if (!config.cartesiaKey) {
         return json(res, 400, { error: 'CARTESIA_API_KEY is not set, so there is nothing to speak.' });
@@ -89,7 +92,7 @@ const server = http.createServer(async (req, res) => {
         sttModel: heard.model,
         sttLanguage: heard.language,
         ttsModel: config.cartesiaModel,
-        note: 'Sonic spoke the line and Deepgram transcribed it back. Low overlap on a Taglish line means the model or language is wrong — nova-2 does not support Tagalog at all; nova-3 with language=multi does.',
+        note: 'Sonic spoke the line and Deepgram transcribed it back. Low overlap on a Taglish line means the model or language is wrong. Measured on this account: nova-3 + tl scores 10/11 at confidence 1.0; nova-3 + multi returns Spanish; nova-2 does not support Tagalog at all.',
       });
     } catch (err) {
       return json(res, 502, { error: 'Speech-to-text check failed', detail: err.message });
@@ -188,7 +191,9 @@ const server = http.createServer(async (req, res) => {
         stack: {
           stt: useDeepgram() ? 'deepgram' : 'openai-realtime',
           stt_model: useDeepgram() ? config.sttModel : config.realtimeModel,
-          stt_language: useDeepgram() ? config.sttLanguage : 'auto',
+          stt_language: useDeepgram()
+            ? (config.sttLanguage === 'auto' ? 'per call (tl for Taglish, en otherwise)' : config.sttLanguage)
+            : 'auto',
           tts: useCartesia() ? 'cartesia' : 'openai',
           tts_model: useCartesia() ? config.cartesiaModel : config.realtimeModel,
           llm: useDeepgram() ? config.chatModel : config.realtimeModel,

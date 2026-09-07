@@ -12,7 +12,7 @@ const ok = (name, cond, extra='') => { if (cond) { pass++; console.log(`  ok   $
 console.log('config');
 ok('useDeepgram true with key + provider', useDeepgram() === true);
 ok('model defaults to nova-3 (nova-2 has no Tagalog)', config.sttModel === 'nova-3', config.sttModel);
-ok('language defaults to multi', config.sttLanguage === 'multi', config.sttLanguage);
+ok('language defaults to auto (mapped per call)', config.sttLanguage === 'auto', config.sttLanguage);
 
 console.log('url');
 const s = new DeepgramStream({ language: 'TAGLISH' });
@@ -25,7 +25,9 @@ ok('punctuate', u.searchParams.get('punctuate') === 'true');
 ok('endpointing=100 for code-switching', u.searchParams.get('endpointing') === '100');
 ok('vad_events on (barge-in)', u.searchParams.get('vad_events') === 'true');
 ok('model nova-3', u.searchParams.get('model') === 'nova-3');
-ok('TAGLISH -> multi', u.searchParams.get('language') === 'multi');
+/* Measured, not assumed: multi returns Spanish for a Taglish line. */
+ok('TAGLISH -> tl', u.searchParams.get('language') === 'tl', u.searchParams.get('language'));
+ok('EN -> en', new URL(new DeepgramStream({ language: 'EN' }).url()).searchParams.get('language') === 'en');
 
 console.log('event handling');
 const seen = { interim: [], final: [], speech: 0 };

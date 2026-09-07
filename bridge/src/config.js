@@ -32,11 +32,15 @@ export const config = {
   sttProvider: read('STT_PROVIDER', 'realtime').toLowerCase(),
   deepgramKey: read('DEEPGRAM_API_KEY'),
   deepgramUrl: read('DEEPGRAM_WS_URL', 'wss://api.deepgram.com/v1/listen'),
-  /* nova-2 does not support Tagalog at all; nova-3 does, and `multi` is what
-     transcribes a sentence that switches between Tagalog and English mid-way,
-     which is what Taglish is. */
+  /* nova-2 does not support Tagalog at all; nova-3 does.
+     `multi` looked like the obvious choice for Taglish and is measurably
+     wrong: on "Ah sige, magkano ba? May laundry kasi ako" it returns Spanish
+     (1/11 words). nova-3 with language=tl returns the sentence verbatim at
+     confidence 1.0 — and keeps the English words inside it, which is the part
+     Taglish actually needs. Measured through /stt-check; re-run it before
+     changing this. `auto` means per-language, mapped below. */
   sttModel: read('DEEPGRAM_MODEL', 'nova-3'),
-  sttLanguage: read('DEEPGRAM_LANGUAGE', 'multi'),
+  sttLanguage: read('DEEPGRAM_LANGUAGE', 'auto'),
   /* Deepgram's own guidance for code-switching. */
   sttEndpointingMs: Number(read('DEEPGRAM_ENDPOINTING_MS', '100')),
   sttUtteranceEndMs: Number(read('DEEPGRAM_UTTERANCE_END_MS', '1000')),

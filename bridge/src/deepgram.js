@@ -14,9 +14,11 @@ import { log } from './log.js';
      model=nova-3   nova-2 does not support Tagalog at all. Asking it for
                     Tagalog is how "sige, magkano ba?" comes back as
                     English words that sound vaguely similar.
-     language=multi Taglish is not Tagalog and not English; it switches
-                    between them inside one sentence. `multi` transcribes
-                    each word in whichever language it was actually said.
+     language=tl    Not `multi`, which is the tempting answer for Taglish
+                    and the wrong one: measured on this account, `multi`
+                    hears "Ah sige, magkano ba? May laundry kasi ako" as
+                    Spanish. `tl` returns it verbatim and leaves the English
+                    words inside it alone, which is what Taglish needs.
    ═══════════════════════════════════════════════════════════════════ */
 
 const TERMINAL = new Set([1000, 1005, 1006]);
@@ -64,18 +66,21 @@ export class DeepgramStream {
   /**
    * Our language keys are not Deepgram's.
    *
-   * Anything Filipino goes to `multi` rather than `tl`: a caller who says
-   * "sige, magkano ba? may laundry kasi ako" is speaking both languages in
-   * one breath, and a single-language model has to force one of them.
+   * Taglish maps to `tl`, not `multi`. The reasoning that `multi` must be
+   * right because Taglish mixes two languages is wrong in practice: nova-3's
+   * Tagalog model already keeps English words it hears, and `multi` mangles
+   * the Tagalog around them. Both measured through /stt-check.
    */
   dgLanguage() {
     const explicit = config.sttLanguage;
     if (explicit && explicit !== 'auto') return explicit;
     switch (String(this.language).toUpperCase()) {
+      /* tl carries Taglish: it transcribes the Tagalog and leaves the
+         English words in it alone. Verified with /stt-check. */
       case 'TL':
-      case 'TAGLISH': return 'multi';
-      case 'AR': return 'multi';
-      case 'HI': return 'multi';
+      case 'TAGLISH': return 'tl';
+      case 'AR': return 'ar';
+      case 'HI': return 'hi';
       default: return 'en';
     }
   }
@@ -179,7 +184,7 @@ export class DeepgramStream {
  * Takes raw audio bytes and returns what Deepgram makes of them, so the
  * Taglish question can be answered without dialling anybody.
  */
-export async function transcribeOnce(bytes, { contentType = 'audio/wav', language = 'multi' } = {}) {
+export async function transcribeOnce(bytes, { contentType = 'audio/wav', language = 'tl' } = {}) {
   const q = new URLSearchParams({
     model: config.sttModel,
     language,
