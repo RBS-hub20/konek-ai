@@ -83,3 +83,46 @@ export function maskPhone(phone: string | null | undefined): string | null {
   if (s.length < 7) return '•'.repeat(s.length);
   return `${s.slice(0, 3)}${'•'.repeat(Math.max(0, s.length - 7))}${s.slice(-4)}`;
 }
+
+/**
+ * The finished recording for a call, straight from Twilio.
+ *
+ * Needed because the recording callback can be lost — a redeploy mid-call,
+ * a retry that never lands — and the caller is sitting on the page waiting
+ * for a play button. Asking Twilio directly always answers.
+ */
+export async function fetchRecordingUrl(callSid: string): Promise<string | null> {
+  if (!hasTwilio) return null;
+  try {
+    const { default: Twilio } = await import('twilio');
+    const client = Twilio(env.twilioSid, env.twilioToken);
+    const list = await client.recordings.list({ callSid, limit: 1 });
+    const rec = list[0];
+    if (!rec) return null;
+    return `https://api.twilio.com/2010-04-01/Accounts/${rec.accountSid}/Recordings/${rec.sid}.mp3`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Twilio serves recording media behind HTTP Basic auth on the account
+ * credentials, so a browser cannot play the URL directly — it 401s. This
+ * fetches the bytes server-side for a route to stream on.
+ */
+export async function fetchRecordingAudio(
+  url: string
+): Promise<{ body: ArrayBuffer; contentType: string } | { error: string }> {
+  if (!hasTwilio) return { error: 'Twilio is not configured.' };
+  try {
+    const auth = Buffer.from(`${env.twilioSid}:${env.twilioToken}`).toString('base64');
+    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+    if (!res.ok) return { error: `Twilio returned ${res.status} for the recording.` };
+    return {
+      body: await res.arrayBuffer(),
+      contentType: res.headers.get('content-type') ?? 'audio/mpeg',
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}

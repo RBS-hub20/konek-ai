@@ -136,7 +136,7 @@ export function TryFreeCallModal({ open, onClose }: { open: boolean; onClose: ()
                       onKeyDown={(e) => e.key === 'Enter' && ready && void submit()}
                     />
                   </Field>
-                  <Field label="Your phone" hint="Cindy calls this number once. It is not stored for marketing.">
+                  <Field label="Your phone" hint="Cindy calls this number once, and the call is recorded so you can play it back. Not stored for marketing.">
                     <PhoneInput value={phone} onChange={setPhone} onEnter={() => ready && void submit()} />
                   </Field>
                   <Field label="Industry">
@@ -152,7 +152,8 @@ export function TryFreeCallModal({ open, onClose }: { open: boolean; onClose: ()
                   <PhoneCall className="h-4 w-4" /> Call My Phone Now — Free 30s
                 </Button>
                 <p className="mt-3 text-center text-[11px] text-muted">
-                  One free call per number per day · {TRIAL_DAYS}-day trial after, no card
+                  Recorded so you can hear it back · one call per number per day ·{' '}
+                  {TRIAL_DAYS}-day trial after, no card
                 </p>
               </div>
             ) : (

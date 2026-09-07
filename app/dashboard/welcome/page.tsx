@@ -1,10 +1,10 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Check, Loader2, Pause, Phone, Play } from 'lucide-react';
+import { ArrowRight, Check, Loader2, Phone } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -30,6 +30,7 @@ type CallState = {
   ready: boolean;
   transcript: string | null;
   recordingUrl: string | null;
+  hasRecording: boolean;
   durationSeconds: number;
   failureReason?: string;
 };
@@ -60,8 +61,11 @@ function Welcome() {
       if (!res.ok) return false;
       const body = (await res.json()) as CallState;
       setCall(body);
-      /* Stop once Twilio is done with it, however it ended. */
-      return body.finished || body.ready;
+      /* Keep going after the call ends: the recording and transcript arrive
+         afterwards, and stopping at "finished" is what left the page saying
+         "Recording appears here" for ever. A call that failed has nothing
+         more coming. */
+      return body.failed || body.ready;
     } catch {
       return false;
     }
@@ -79,8 +83,9 @@ function Welcome() {
       const done = await poll();
       if (done) clearInterval(t);
     }, 5000);
-    /* Two minutes is longer than any 30-second demo needs. */
-    const stop = setTimeout(() => clearInterval(t), 120_000);
+    /* Twilio finishes a recording a little after the call, so this outlasts
+       the call itself rather than the length of the conversation. */
+    const stop = setTimeout(() => clearInterval(t), 240_000);
     return () => { alive = false; clearInterval(t); clearTimeout(stop); };
   }, [callId, poll]);
 
@@ -176,19 +181,9 @@ function Welcome() {
 /* ── The call itself ─────────────────────────────────────────────── */
 
 function CallCard({ call, callId, waited }: { call: CallState | null; callId: string | null; waited: number }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-
-  const recording = call?.recordingUrl ?? null;
-  /* Twilio serves the recording without an extension; .mp3 is the playable one. */
-  const src = recording ? (recording.endsWith('.mp3') ? recording : `${recording}.mp3`) : null;
-
-  const toggle = () => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (playing) { el.pause(); setPlaying(false); return; }
-    void el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-  };
+  /* Already a URL on this origin that streams the audio — Twilio's own URL
+     needs credentials the browser does not have. */
+  const src = call?.recordingUrl ?? null;
 
   return (
     <section className="mt-9 rounded-brand border border-line bg-surface p-6 md:p-7">
@@ -209,31 +204,30 @@ function CallCard({ call, callId, waited }: { call: CallState | null; callId: st
           </div>
         </div>
 
-        {src ? (
-          <>
-            <Button variant="secondary" size="sm" className="gap-1.5" onClick={toggle}>
-              {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              {playing ? 'Pause' : 'Play the recording'}
-            </Button>
-            <audio
-              ref={audioRef}
-              src={src}
-              onEnded={() => setPlaying(false)}
-              onPause={() => setPlaying(false)}
-              className="hidden"
-            />
-          </>
-        ) : (
+        {!src && (
           <span className="flex items-center gap-2 text-[12px] text-muted">
-            {!call?.finished && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {!call?.failed && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {!callId
               ? 'No call to play'
               : call?.failed
                 ? 'Nothing to play — the call never connected'
-                : 'Recording appears here when the call ends'}
+                : call?.finished
+                  ? 'Twilio is still writing the recording…'
+                  : 'Recording appears here when the call ends'}
           </span>
         )}
       </div>
+
+      {/* The point of the demo is hearing Cindy, so this is a full player
+          rather than a button — scrub back to the opener and listen again. */}
+      {src && (
+        <div className="mt-5 border-t border-line pt-5">
+          <div className="mb-2.5 text-[12px] font-medium uppercase tracking-wide text-muted">
+            Cindy&rsquo;s voice on this call
+          </div>
+          <audio controls preload="metadata" src={src} className="w-full" />
+        </div>
+      )}
 
       <div className="mt-6 border-t border-line pt-5">
         <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Transcript</div>
@@ -243,8 +237,8 @@ function CallCard({ call, callId, waited }: { call: CallState | null; callId: st
           <p className="mt-3 text-[13px] leading-relaxed text-muted">
             {call?.failed
               ? 'No transcript — there was no conversation to write up.'
-              : waited > 60
-                ? 'No transcript came back for this one. The setup below is unaffected.'
+              : waited > 150
+                ? 'No transcript came back for this one. The recording above is the record of the call.'
                 : 'Writing up what was said…'}
           </p>
         )}

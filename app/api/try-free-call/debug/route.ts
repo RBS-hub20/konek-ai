@@ -1,7 +1,7 @@
 import { db, hasSupabase } from '@/lib/supabase';
 import { getBusinessForRead, safe } from '@/lib/server/tenant';
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
-import { explainTwilioFailure, fetchTwilioCall, maskPhone } from '@/lib/server/twilioStatus';
+import { explainTwilioFailure, fetchRecordingUrl, fetchTwilioCall, maskPhone } from '@/lib/server/twilioStatus';
 import { ok, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
@@ -59,6 +59,9 @@ export async function GET() {
 
     const live = last.twilio_sid ? await fetchTwilioCall(last.twilio_sid) : null;
     const twilio = live && 'status' in live ? live : null;
+    const twilioRecording = !last.recording_url && last.twilio_sid
+      ? await fetchRecordingUrl(last.twilio_sid)
+      : null;
 
     out.lastCall = {
       at: last.created_at,
@@ -68,10 +71,15 @@ export async function GET() {
       twilioStatus: twilio?.status ?? null,
       twilioCode: twilio?.errorCode ?? null,
       twilioMessage: twilio?.errorMessage ?? null,
-      durationSeconds: twilio?.durationSeconds ?? null,
+      durationSeconds: twilio?.durationSeconds ?? last.duration_seconds ?? null,
+      /* The two things the welcome screen waits for. */
+      hasRecording: Boolean(last.recording_url) || Boolean(twilioRecording),
+      recordingSource: last.recording_url ? 'saved by the callback' : twilioRecording ? 'found on Twilio' : null,
+      hasTranscript: Boolean(last.transcript),
       ...(live && 'error' in live ? { statusUnavailable: live.error } : {}),
     };
 
+    out.voice = await bridgeVoiceReport();
     out.verdict = verdictFor(last, twilio);
     return ok(out);
   } catch (err) {
@@ -81,7 +89,12 @@ export async function GET() {
 
 /* ── Pieces ──────────────────────────────────────────────────────── */
 
-type Row = { created_at: string; phone: string | null; status: string; twilio_sid: string | null };
+type Row = {
+  created_at: string; phone: string | null; status: string; twilio_sid: string | null;
+  recording_url: string | null; transcript: string | null; duration_seconds: number | null;
+};
+
+const SELECT = 'created_at, phone, status, twilio_sid, recording_url, transcript, duration_seconds';
 
 async function lastTrialCall(): Promise<Row | null> {
   if (!hasSupabase) return null;
@@ -89,7 +102,7 @@ async function lastTrialCall(): Promise<Row | null> {
      is missing, which is precisely the deployment that needs this answer. */
   const flagged = await safe(async () => {
     const { data, error } = await db().from('call_logs')
-      .select('created_at, phone, status, twilio_sid')
+      .select(SELECT)
       .eq('is_trial', true)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (error) throw error;
@@ -99,7 +112,7 @@ async function lastTrialCall(): Promise<Row | null> {
 
   return await safe(async () => {
     const { data, error } = await db().from('call_logs')
-      .select('created_at, phone, status, twilio_sid')
+      .select(SELECT)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (error) throw error;
     return data as Row | null;
@@ -145,5 +158,25 @@ function verdictFor(last: Row, twilio: { status: string; errorCode: number | nul
       return `Twilio could not connect the call (status "${twilio.status}"${twilio.errorCode ? `, code ${twilio.errorCode}` : ''}).`;
     default:
       return `Twilio has the call as "${twilio.status}".`;
+  }
+}
+
+/**
+ * What the bridge says about the voice on recent calls.
+ *
+ * "It sounded like a robot" is a bridge question, not a Vercel one — the
+ * synthesiser lives there. This pulls its redacted summary so both halves
+ * of the answer arrive in one place.
+ */
+async function bridgeVoiceReport(): Promise<unknown> {
+  const wss = env.mediaStreamUrl;
+  if (!wss) return { note: 'No bridge configured.' };
+  const http = wss.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/media-stream$/, '');
+  try {
+    const res = await fetch(`${http}/calls?n=5`, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return { note: `The bridge answered ${res.status} — it may be running an older build.` };
+    return await res.json();
+  } catch (err) {
+    return { note: `Could not reach the bridge: ${err instanceof Error ? err.message : String(err)}` };
   }
 }

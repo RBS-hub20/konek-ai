@@ -5,6 +5,7 @@ import { log, recentLogs } from './log.js';
 import { CallSession, SEEN_EVENTS as SEEN_EVENT_TYPES } from './session.js';
 import { EventEmitter } from 'node:events';
 import { CartesiaStream, listVoices, resolveVoiceFor, shapeForSpeech } from './cartesia.js';
+import { recentCallSummaries } from './summary.js';
 
 /* The Railway service: an HTTP server for health checks, with a websocket
    endpoint at /media-stream that Twilio connects each live call to. */
@@ -31,6 +32,23 @@ const server = http.createServer(async (req, res) => {
       return json(res, 401, { error: 'x-konek-key required' });
     }
     return json(res, 200, { lines: recentLogs(Number(url.searchParams.get('n') ?? 200)) });
+  }
+
+  /* How the last few calls actually sounded. Redacted on purpose — see
+     summary.js — so it needs no secret and leaks nothing. */
+  if (url.pathname === '/calls') {
+    const calls = recentCallSummaries(Number(url.searchParams.get('n') ?? 10));
+    const robot = calls.find((c) => c.voice !== 'cartesia');
+    return json(res, 200, {
+      totalCalls,
+      activeCalls,
+      calls,
+      verdict: !calls.length
+        ? 'No calls have completed since this bridge last started.'
+        : robot
+          ? `The last call using ${robot.voice} did not speak through Cartesia${robot.lastError ? ` (${robot.lastError})` : ''} — that is the robot voice.`
+          : 'Every recent call spoke through Cartesia.',
+    });
   }
 
   /* Which voices this account can use — for picking a better one by name. */

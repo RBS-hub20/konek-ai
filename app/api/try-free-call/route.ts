@@ -102,16 +102,30 @@ export async function POST(req: Request) {
     try {
       const { default: Twilio } = await import('twilio');
       const client = Twilio(env.twilioSid, env.twilioToken);
+      const twiml = trialTwiml({ company: businessName, language, industry, country, scriptId: script?.id ?? null, opener, speed });
+      /* Say vs Stream decides whether this is Cindy or a text-to-speech
+         announcement, so the log says which one went out. */
+      console.log(
+        `[TryFreeCall] TwiML mode: ${hasMediaBridge ? 'Connect/Stream (Cindy via the bridge)' : 'Say (opener only — no bridge configured)'}`
+      );
+
       const call = await client.calls.create({
         to: phone,
         from,
-        twiml: trialTwiml({ company: businessName, language, industry, country, scriptId: script?.id ?? null, opener, speed }),
+        twiml,
+        /* The demo exists so the visitor can hear the voice, and they asked
+           for the call themselves — but they should still be told, so the
+           modal says the call is recorded before they press the button. */
+        record: true,
+        recordingStatusCallback: `${env.appUrl}/api/call/recording`,
+        recordingStatusCallbackEvent: ['completed'],
+        recordingStatusCallbackMethod: 'POST',
         statusCallback: `${env.appUrl}/api/call/transcript`,
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         statusCallbackMethod: 'POST',
       });
       twilioSid = call.sid;
-      console.log(`[TryFreeCall] Twilio call created: ${call.sid} to ${phone} from ${from} (status ${call.status})`);
+      console.log(`[TryFreeCall] Twilio call created: ${call.sid} to ${phone} from ${from} (status ${call.status}, recording on)`);
     } catch (err) {
       const t = err as { message?: string; code?: number | string };
       const code = typeof t.code === 'string' ? Number(t.code) : t.code ?? null;

@@ -1,6 +1,6 @@
-import { getCallLog } from '@/lib/server/tenant';
+import { getCallLog, updateCallLog, safe } from '@/lib/server/tenant';
 import { verifyTrialCall } from '@/lib/server/trialToken';
-import { explainTwilioFailure, fetchTwilioCall } from '@/lib/server/twilioStatus';
+import { explainTwilioFailure, fetchRecordingUrl, fetchTwilioCall } from '@/lib/server/twilioStatus';
 import { fail, ok, describeError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
@@ -48,6 +48,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return fail('That call is not available.', 404);
     }
 
+    /* The recording callback can be lost, so once Twilio says the call is
+       over we ask it directly rather than leaving a play button that never
+       appears. */
+    let recordingUrl = call.recording_url;
     const live = call.twilio_sid ? await fetchTwilioCall(call.twilio_sid) : null;
     const twilio = live && 'status' in live ? live : null;
     const twilioError = live && 'error' in live ? live.error : null;
@@ -55,6 +59,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const status = twilio?.status ?? String(call.status ?? 'queued').toLowerCase();
     const phase = PHASE[status] ?? { label: 'Connecting…', done: false, rang: false };
     const failure = twilio ? explainTwilioFailure(twilio.errorCode, twilio.to) : null;
+
+    if (!recordingUrl && call.twilio_sid && (twilio?.status === 'completed' || phase.done)) {
+      recordingUrl = await fetchRecordingUrl(call.twilio_sid);
+      if (recordingUrl) await safe(() => updateCallLog(call.id, { recording_url: recordingUrl }), null);
+    }
 
     return ok({
       id: call.id,
@@ -65,10 +74,18 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       finished: phase.done,
       failed: status === 'failed' || status === 'canceled',
       durationSeconds: twilio?.durationSeconds || call.duration_seconds || 0,
-      recordingUrl: call.recording_url,
+      /* Our own streaming route, not Twilio's URL: Twilio's needs Basic auth
+         and would expose the account SID to the page. */
+      recordingUrl: recordingUrl
+        ? `/api/try-free-call/${call.id}/audio${token ? `?t=${encodeURIComponent(token)}` : ''}`
+        : null,
+      hasRecording: Boolean(recordingUrl),
       transcript: call.transcript,
       language: call.language,
-      ready: phase.done || Boolean(call.transcript),
+      /* "Ready" now means there is something to show, not merely that the
+         call ended — the page was stopping its poll before the recording and
+         transcript arrived, and then waited for ever. */
+      ready: Boolean(recordingUrl) && Boolean(call.transcript),
       startedAt: call.created_at,
       /* Present only when something went wrong, and written for a person. */
       ...(failure ? { failureReason: failure } : {}),

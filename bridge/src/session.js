@@ -149,29 +149,42 @@ export class CallSession {
 
     /* Bring Sonic up before the model starts talking. If it cannot connect we
        fall back to OpenAI's own voice rather than leaving the caller silent. */
+    /* The script decides the pace and the warmth. A phone line at 8 kHz is
+       unforgiving, so a sales call runs slower than a conversational one. */
+    const speed = this.params.speed ? Number(this.params.speed) : (callCfg.speed ?? null);
+    this.speed = Number.isFinite(speed) && speed ? speed : null;
+    /* voice_settings.emotion was being read from the database, sent to the
+       bridge, and then dropped on the floor here. */
+    this.emotion = emotionTags(callCfg.script?.voice_settings?.emotion) ?? null;
+    this.scriptName = callCfg.script?.name ?? null;
+
     if (useCartesia()) {
       try {
-        /* The script decides the pace. A phone line at 8 kHz is unforgiving,
-           so a sales call runs slower than a conversational one. */
-        const speed = this.params.speed
-          ? Number(this.params.speed)
-          : (callCfg.speed ?? null);
-
         this.tts = new CartesiaStream({
           language: this.language,
-          speed: Number.isFinite(speed) && speed ? speed : null,
+          speed: this.speed,
+          emotion: this.emotion,
           onAudio: (b64) => this.playAudio(b64),
           onError: () => this.failoverToOpenAIVoice(),
         });
-        if (speed) log.info('tts', `speed ${speed} for this call`);
         await this.tts.connect();
         this.stage = 'cartesia connected';
+        this.voiceProvider = 'cartesia';
+        log.info(
+          'tts',
+          `cartesia for ${this.callSid}: ${this.language}, speed ${this.speed ?? 'default'}, ` +
+          `emotion ${this.emotion?.join('+') ?? 'default'}, script ${this.scriptName ?? 'none'}`
+        );
       } catch (err) {
         this.lastError = `cartesia: ${err?.message ?? err}`;
-        log.warn('cartesia', `unavailable, using the OpenAI voice: ${err.message}`);
+        /* This is the line that explains a robot voice, so it says so. */
+        log.warn('cartesia', `unavailable — falling back to the OpenAI voice (this sounds robotic): ${err.message}`);
         this.tts = null;
         this.ttsFailed = true;
+        this.voiceProvider = 'openai-failover';
       }
+    } else {
+      this.voiceProvider = 'openai';
     }
 
     this.stage = 'connecting to openai';
@@ -510,8 +523,9 @@ The customer is speaking ${lang}. Reply in ${lang} from now on. Do not mention t
   /** Sonic died mid-call — finish the call with OpenAI's voice instead. */
   failoverToOpenAIVoice() {
     if (!this.tts || this.ttsFailed) return;
-    log.warn('cartesia', 'failing over to the OpenAI voice for the rest of this call');
+    log.warn('cartesia', 'failing over to the OpenAI voice for the rest of this call (this sounds robotic)');
     this.ttsFailed = true;
+    this.voiceProvider = 'openai-failover';
     try { this.tts.close(); } catch { /* already gone */ }
     this.tts = null;
     this.sendOpenAI({
@@ -576,7 +590,25 @@ The customer is speaking ${lang}. Reply in ${lang} from now on. Do not mention t
     if (this.timeout) clearTimeout(this.timeout);
 
     const durationSeconds = Math.round((Date.now() - this.startedAt) / 1000);
-    log.info('call', `end ${this.callSid} after ${durationSeconds}s (${status})`);
+    log.info('call', `end ${this.callSid} after ${durationSeconds}s (${status}), voice ${this.voiceProvider ?? 'unknown'}`);
+
+    /* Kept so "why did it sound like a robot" is answerable afterwards without
+       the shared secret and without reading anyone's conversation. */
+    recordCallSummary({
+      at: new Date(this.startedAt).toISOString(),
+      durationSeconds,
+      status,
+      kind: this.params.outbound ?? 'inbound',
+      language: this.startedLanguage,
+      endedLanguage: this.language,
+      voice: this.voiceProvider ?? 'unknown',
+      cartesiaFailed: Boolean(this.ttsFailed),
+      speed: this.speed ?? null,
+      emotion: this.emotion ?? null,
+      script: this.scriptName ?? null,
+      turns: this.transcript.length,
+      lastError: this.lastError ?? null,
+    });
 
     try { this.tts?.close(); } catch { /* already gone */ }
     try { this.openai?.close(); } catch { /* already gone */ }

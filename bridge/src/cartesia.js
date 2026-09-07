@@ -354,6 +354,33 @@ export class CartesiaStream {
  * and Arabic are rejected outright — so the model is selectable per language
  * rather than assumed to be universal.
  */
+/**
+ * A script's emotion, in the form Sonic's controls take.
+ *
+ * outbound_scripts stores a human word — "warm-professional", "friendly" —
+ * and Sonic wants tags like "positivity:high". Without this mapping the
+ * script's own voice settings never reach the synthesiser at all, and every
+ * call speaks in whatever the deployment-wide default happens to be.
+ */
+export function emotionTags(name) {
+  const key = String(name ?? '').toLowerCase().trim();
+  const map = {
+    'warm-professional': ['positivity:high', 'curiosity:low'],
+    warm: ['positivity:high'],
+    professional: ['positivity:low'],
+    friendly: ['positivity:high'],
+    calm: ['positivity:low'],
+    energetic: ['positivity:highest', 'surprise:high'],
+    hype: ['positivity:highest', 'surprise:high'],
+    luxury: ['positivity:low', 'curiosity:low'],
+    neutral: [],
+  };
+  if (key in map) return map[key];
+  /* Already a control tag ("positivity:high") — pass it straight through. */
+  if (/^[a-z]+:[a-z]+$/.test(key)) return [key];
+  return null;
+}
+
 export function modelForLanguage(languageKey) {
   const code = cartesiaLanguage(languageKey);
   return config.modelByLanguage[code] ?? config.cartesiaModel;
