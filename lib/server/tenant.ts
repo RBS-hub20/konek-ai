@@ -69,6 +69,7 @@ function mem(): Mem {
         trial_ends_at: null,
         subscription_status: 'none',
         billing_interval: 'monthly',
+        sales_tenant: false,
         trial_phone: null,
         trial_call_id: null,
         settings: { whatsapp_followup: true, sms_fallback: true },
@@ -127,11 +128,23 @@ const normalizeBusiness = (b: Record<string, unknown>): Business => ({
   trial_ends_at: (b.trial_ends_at as string) ?? null,
   subscription_status: (b.subscription_status as string) ?? 'none',
   billing_interval: (b.billing_interval as string) ?? 'monthly',
+  sales_tenant: b.sales_tenant === true,
   trial_phone: (b.trial_phone as string) ?? null,
   trial_call_id: (b.trial_call_id as string) ?? null,
   settings: (b.settings as Business['settings']) ?? {},
   created_at: (b.created_at as string) ?? nowIso(),
 });
+
+/**
+ * The tenant the sales desk calls as.
+ *
+ * Marked with a flag rather than matched on a name, so renaming "KONEK AI"
+ * does not silently change which number the desk dials from.
+ */
+export async function getSalesTenant(): Promise<Business | null> {
+  const all = await safe(() => listBusinesses(), []);
+  return all.find((b) => b.sales_tenant) ?? null;
+}
 
 export async function listBusinesses(): Promise<Business[]> {
   if (!hasSupabase) return mem().businesses;
@@ -161,7 +174,7 @@ export async function updateBusiness(id: string, patch: Partial<Business>): Prom
     'handoff_number', 'handoff_backup', 'handoff_enabled', 'handoff_mode',
     'industry', 'address', 'city', 'country', 'hours', 'logo_url', 'onboarded_at',
     'trial_started_at', 'trial_ends_at', 'subscription_status', 'billing_interval',
-    'trial_phone', 'trial_call_id',
+    'trial_phone', 'trial_call_id', 'sales_tenant',
     'settings',
   ] as const;
   const clean: Record<string, unknown> = {};
@@ -220,6 +233,7 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     trial_ends_at: input.trial_ends_at ?? null,
     subscription_status: input.subscription_status ?? 'none',
     billing_interval: input.billing_interval ?? 'monthly',
+    sales_tenant: input.sales_tenant ?? false,
     trial_phone: input.trial_phone ?? null,
     trial_call_id: input.trial_call_id ?? null,
     settings: input.settings ?? { whatsapp_followup: true, sms_fallback: true },
@@ -230,13 +244,29 @@ export async function createBusiness(input: Partial<Business>): Promise<Business
     mem().enabled[created.id] = new Set(['booking', 'faq']);
     return created;
   }
-  const { data, error } = await db().from('businesses').insert(row).select().single();
-  if (error) throw error;
-  const created = normalizeBusiness(data);
-  await db().from('business_brain').insert({ business_id: created.id, business_name: created.name, goal: 'Book' });
-  await db().from('business_skills').insert(
-    ['booking', 'faq'].map((skill_id) => ({ business_id: created.id, skill_id, is_active: true }))
+  /* Every other write here drops columns the table does not have yet; this
+     one did not, so a database missing billing_interval could not create a
+     tenant at all — it failed with "Could not find the 'billing_interval'
+     column" and the console had no way past it. */
+  const { data, dropped, missingTable, error } = await insertResilient<Record<string, unknown>>(
+    db(), 'businesses', row
   );
+  if (missingTable) throw new Error('The businesses table does not exist. Run supabase.sql.');
+  if (!data) throw error ?? new Error('Could not create the business');
+  if (dropped.length) console.warn('[business] created without:', dropped.join(', '));
+
+  const created = normalizeBusiness(data);
+  /* Neither of these should be able to fail a tenant that already exists. */
+  await safe(async () => {
+    await db().from('business_brain').insert({ business_id: created.id, business_name: created.name, goal: 'Book' });
+    return null;
+  }, null);
+  await safe(async () => {
+    await db().from('business_skills').insert(
+      ['booking', 'faq'].map((skill_id) => ({ business_id: created.id, skill_id, is_active: true }))
+    );
+    return null;
+  }, null);
   return created;
 }
 
@@ -859,6 +889,7 @@ function fallbackBusiness(): Business {
     trial_ends_at: null,
     subscription_status: 'none',
     billing_interval: 'monthly',
+    sales_tenant: false,
     trial_phone: null,
     trial_call_id: null,
     settings: { whatsapp_followup: true, sms_fallback: true },

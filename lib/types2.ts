@@ -76,6 +76,8 @@ export interface Business {
   /** none | trialing | active | canceled — the only signal that money moved. */
   subscription_status: string;
   billing_interval: string;
+  /** The tenant the outbound sales desk dials as, and calls back to. */
+  sales_tenant: boolean;
   /** The phone that took the free call, and the call itself. */
   trial_phone: string | null;
   trial_call_id: string | null;

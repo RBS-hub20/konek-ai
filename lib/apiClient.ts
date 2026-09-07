@@ -191,6 +191,11 @@ export const api = {
     req<{ live: boolean; numbers: { phoneNumber: string; friendlyName: string; sid: string; assignedTo: { id: string; name: string } | null }[]; verify?: { verified: boolean; reason?: string } }>(
       `/api/twilio/numbers${verify ? `?verify=${encodeURIComponent(verify)}` : ''}`
     ),
+  salesTenant: () => req<{ salesTenant: Business | null }>('/api/super-admin/sales-tenant'),
+  createSalesTenant: (input: { number?: string; name?: string; email?: string; businessId?: string }) =>
+    req<{ salesTenant: Business; webhook: string | null; webhookError?: string }>(
+      '/api/super-admin/sales-tenant', { method: 'POST', body: JSON.stringify(input) }
+    ),
   buyNumber: (input: { areaCode?: string; country?: string; businessId?: string; search?: boolean }) =>
     req<{ bought: boolean; phoneNumber?: string; available?: { phoneNumber: string; locality: string }[] }>(
       '/api/twilio/numbers', { method: 'POST', body: JSON.stringify(input) }

@@ -35,8 +35,20 @@ export interface CallerId {
  * tenant's own calls but is only a fallback for the sales desk — the desk
  * calls other people's countries.
  */
-export function callerIdFor(country: string | null | undefined, tenantNumber?: string | null): CallerId | null {
+export function callerIdFor(
+  country: string | null | undefined,
+  tenantNumber?: string | null,
+  /** The sales desk's own number, which outranks a local caller id. */
+  salesNumber?: string | null
+): CallerId | null {
   const code = (country ?? '').toUpperCase();
+
+  /* A prospect who misses the call rings this number back, so it has to be
+     one the desk answers with its own pitch. That matters more than the
+     dialling country looking local. */
+  const sales = salesNumber?.trim();
+  if (sales) return { from: sales, source: 'the KONEK AI sales number', fallback: false };
+
   const local = BY_COUNTRY[code]?.() ?? '';
   if (local) return { from: local, source: `TWILIO_${code}_NUMBER`, fallback: false };
 

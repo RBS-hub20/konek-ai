@@ -1,4 +1,5 @@
 import { getBrain, getBusinessForRead, getScript, listSkills, safe } from '@/lib/server/tenant';
+import { SALES_CALLBACK_OPENER, salesCallbackPrompt } from '@/lib/voice/salesCallback';
 import { buildOpenerLine, buildReceptionistPrompt, speedFor, languageModeFor } from '@/lib/voice/cindyReceptionist';
 import { buildCallPrompt, buildOpener } from '@/lib/ai/callPrompt';
 import { vibeConfig } from '@/lib/ai/vibes';
@@ -44,6 +45,12 @@ export async function GET(req: Request) {
       industry: p.get('industry') ?? '',
     };
 
+    /* Someone ringing the sales line back is a prospect Cindy already called
+       and who missed it, so they get the closer rather than a receptionist
+       for a business that is not theirs. Detected from the tenant itself, so
+       the bridge needs no extra parameter to make this work. */
+    const salesCallback = business.sales_tenant === true && !script;
+
     const brain = await safe<BusinessBrain | null>(() => getBrain(business.id), null);
     const allSkills = await safe<SkillRecord[]>(() => listSkills(business.id), []);
     const skills = allSkills.filter((s) => s.is_active);
@@ -60,10 +67,15 @@ export async function GET(req: Request) {
       voiceStyle: v.label,
       systemPrompt: script
         ? buildReceptionistPrompt({ script, company: vars.company, contact: vars.contact, industry: vars.industry, country: p.get('country') })
-        : buildCallPrompt({ business, brain, skills, vibe, language, customerName }),
+        : salesCallback
+          ? salesCallbackPrompt()
+          : buildCallPrompt({ business, brain, skills, vibe, language, customerName }),
       opener: script
         ? buildOpenerLine({ script, company: vars.company, contact: vars.contact, industry: vars.industry, country: p.get('country') })
-        : buildOpener(business, brain, vibe, customerName, language),
+        : salesCallback
+          ? SALES_CALLBACK_OPENER
+          : buildOpener(business, brain, vibe, customerName, language),
+      salesCallback,
       script: script
         ? { id: script.id, name: script.name, voice_settings: script.voice_settings }
         : null,
@@ -76,3 +88,4 @@ export async function GET(req: Request) {
     };
   });
 }
+

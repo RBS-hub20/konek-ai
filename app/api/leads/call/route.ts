@@ -1,4 +1,4 @@
-import { getBusinessForRead, getLead, getScript, logCall, pickScript, safe, updateLead } from '@/lib/server/tenant';
+import { getBusinessForRead, getLead, getSalesTenant, getScript, logCall, pickScript, safe, updateLead } from '@/lib/server/tenant';
 import { type OutboundScript } from '@/lib/types2';
 import { buildOpenerLine, languageModeFor, speedFor } from '@/lib/voice/cindyReceptionist';
 import { env, hasTwilio, hasMediaBridge } from '@/lib/env';
@@ -44,9 +44,10 @@ export async function POST(req: Request) {
     if (!n.valid || !n.e164) return fail(n.reason ?? `Lead phone "${lead.phone}" is not valid.`);
     const phone = n.e164;
     const { business } = await getBusinessForRead(null);
-    /* The sales desk calls other people's countries, so a local caller id
-       wins over the tenant's own number. */
-    const caller = callerIdFor(lead.country, business.outbound_number);
+    /* The desk dials as itself: a business that misses the call and rings
+       back must reach the KONEK AI sales line, not a tenant's receptionist. */
+    const salesTenant = await safe(() => getSalesTenant(), null);
+    const caller = callerIdFor(lead.country, business.outbound_number, salesTenant?.outbound_number);
     if (hasTwilio && !caller) return fail('No outbound number configured.', 400);
     const from = caller?.from ?? null;
     const callerWarning = caller ? callerIdWarning(caller, lead.country) : null;
@@ -110,6 +111,9 @@ export async function POST(req: Request) {
           statusCallbackMethod: 'POST',
         });
         twilioSid = call.sid;
+        if (salesTenant?.outbound_number) {
+          console.log(`[OutboundSales] Calling with KONEK AI number ${salesTenant.outbound_number} (${salesTenant.name})`);
+        }
         console.log(
           `[Outbound] Twilio call created: ${call.sid} to ${phone} from ${from} ` +
           `(${caller?.source}, ${lead.country ?? 'unknown country'}, recording on)`

@@ -73,6 +73,8 @@ alter table businesses add column if not exists trial_ends_at       timestamptz;
 alter table businesses add column if not exists subscription_status text default 'none';
   -- none | trialing | active | canceled
 alter table businesses add column if not exists billing_interval    text default 'monthly';
+alter table businesses add column if not exists sales_tenant        boolean default false;
+  -- the tenant the outbound sales desk dials as
   -- monthly | yearly
 alter table businesses add column if not exists trial_phone         text;   -- who took the free call
 alter table businesses add column if not exists trial_call_id       uuid;   -- the call that hooked them
@@ -165,6 +167,7 @@ alter table leads add column if not exists script_id          uuid;         -- t
 alter table leads add column if not exists last_call_id       uuid;         -- call_logs row, for playback
 alter table leads add column if not exists next_follow_up_at  timestamptz;  -- set by a Callback disposition
 alter table leads add column if not exists disposition_at     timestamptz;  -- when it was last dispositioned
+alter table leads add column if not exists disposition        text;         -- the last outcome, kept when status moves on
 
 create index if not exists leads_followup_idx on leads (next_follow_up_at)
   where next_follow_up_at is not null;
@@ -370,8 +373,12 @@ select b.id, b.name, 'Skin treatments, facials and aftercare packages', '₱2,50
 from businesses b
 where not exists (select 1 from business_brain bb where bb.business_id = b.id);
 
+-- Three target columns need three expressions. Without the `true` this fails
+-- with "INSERT has more target columns than expressions", and because the SQL
+-- editor runs the whole file in one transaction, that single error rolls back
+-- every table and column above it.
 insert into business_skills (business_id, skill_id, is_active)
-select b.id, s.id from businesses b cross join (values ('booking'),('faq'),('closer')) as s(id)
+select b.id, s.id, true from businesses b cross join (values ('booking'),('faq'),('closer')) as s(id)
 on conflict (business_id, skill_id) do nothing;
 
 -- ── 14 · Row Level Security ─────────────────────────────────────────
