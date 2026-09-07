@@ -22,6 +22,29 @@ export const config = {
   appUrl: read('KONEK_APP_URL', 'https://konek-ai.vercel.app').replace(/\/$/, ''),
   apiSecret: read('KONEK_API_SECRET'),
 
+  /* Speech-to-text.
+     'realtime' (default) lets the OpenAI Realtime model hear the caller
+     itself — one socket, its own turn-taking, and what every call has used
+     so far. 'deepgram' switches to a cascade: Deepgram transcribes, a chat
+     model answers, Cartesia speaks. Kept behind a switch because the two
+     have completely different turn-taking, and only one of them is proven
+     on this account. */
+  sttProvider: read('STT_PROVIDER', 'realtime').toLowerCase(),
+  deepgramKey: read('DEEPGRAM_API_KEY'),
+  deepgramUrl: read('DEEPGRAM_WS_URL', 'wss://api.deepgram.com/v1/listen'),
+  /* nova-2 does not support Tagalog at all; nova-3 does, and `multi` is what
+     transcribes a sentence that switches between Tagalog and English mid-way,
+     which is what Taglish is. */
+  sttModel: read('DEEPGRAM_MODEL', 'nova-3'),
+  sttLanguage: read('DEEPGRAM_LANGUAGE', 'multi'),
+  /* Deepgram's own guidance for code-switching. */
+  sttEndpointingMs: Number(read('DEEPGRAM_ENDPOINTING_MS', '100')),
+  sttUtteranceEndMs: Number(read('DEEPGRAM_UTTERANCE_END_MS', '1000')),
+
+  /* The model that answers, when the cascade is doing the listening. */
+  chatModel: read('OPENAI_CHAT_MODEL', 'gpt-4o'),
+  chatUrl: read('OPENAI_CHAT_URL', 'https://api.openai.com/v1/chat/completions'),
+
   /* Text-to-speech. 'cartesia' routes model text through Sonic; 'openai'
      keeps the realtime speech-to-speech voice. */
   ttsProvider: read('TTS_PROVIDER', 'openai').toLowerCase(),
@@ -86,9 +109,22 @@ export const voiceForVibe = (style) => VIBE_VOICES[style] ?? 'alloy';
 export const useCartesia = () =>
   config.ttsProvider === 'cartesia' && Boolean(config.cartesiaKey);
 
+/** True only when Deepgram is both asked for and usable. */
+export const useDeepgram = () =>
+  config.sttProvider === 'deepgram' && Boolean(config.deepgramKey);
+
 export function assertConfig() {
   const missing = [];
   if (!config.openaiKey) missing.push('OPENAI_API_KEY');
+  if (config.sttProvider === 'deepgram' && !config.deepgramKey) {
+    /* Not fatal: the realtime model can still hear, so the call goes through
+       rather than the bridge refusing to boot over a missing key. */
+    console.warn(
+      '[KONEK AI] STT_PROVIDER=deepgram but DEEPGRAM_API_KEY is missing — ' +
+      'falling back to OpenAI Realtime for speech-to-text. Set DEEPGRAM_API_KEY ' +
+      'on the Railway service, not only on Vercel: the audio never reaches Vercel.'
+    );
+  }
   if (config.ttsProvider === 'cartesia' && !config.cartesiaKey) {
     /* Not fatal: fall back to the OpenAI voice rather than refusing to boot. */
     console.warn(

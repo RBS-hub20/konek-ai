@@ -6,6 +6,7 @@ import { CallSession, SEEN_EVENTS as SEEN_EVENT_TYPES } from './session.js';
 import { EventEmitter } from 'node:events';
 import { CartesiaStream, listVoices, resolveVoiceFor, shapeForSpeech } from './cartesia.js';
 import { recentCallSummaries } from './summary.js';
+import { transcribeOnce } from './deepgram.js';
 
 /* The Railway service: an HTTP server for health checks, with a websocket
    endpoint at /media-stream that Twilio connects each live call to. */
@@ -49,6 +50,50 @@ const server = http.createServer(async (req, res) => {
           ? `The last call using ${robot.voice} did not speak through Cartesia${robot.lastError ? ` (${robot.lastError})` : ''} — that is the robot voice.`
           : 'Every recent call spoke through Cartesia.',
     });
+  }
+
+  /* Does Deepgram actually hear Taglish?
+     Sonic says the line, Deepgram transcribes it, and both are returned side
+     by side — so the question can be answered without ringing anybody, and
+     without anyone having to trust that it works. */
+  if (url.pathname === '/stt-check') {
+    if (!config.deepgramKey) {
+      return json(res, 400, {
+        error: 'DEEPGRAM_API_KEY is not set on this service.',
+        hint: 'Set it on Railway. Setting it only on Vercel does nothing — the call audio never reaches Vercel.',
+      });
+    }
+    const said = url.searchParams.get('text')
+      ?? 'Ah sige, magkano ba? May laundry kasi ako dito sa Makati.';
+    const language = (url.searchParams.get('language') ?? 'TL').toUpperCase();
+    const dgLanguage = url.searchParams.get('dg') ?? config.sttLanguage;
+    try {
+      if (!config.cartesiaKey) {
+        return json(res, 400, { error: 'CARTESIA_API_KEY is not set, so there is nothing to speak.' });
+      }
+      const mulaw = await synthesizeToBuffer(said, language, { speed: url.searchParams.get('speed') });
+      const wav = wrapMulawWav(mulaw);
+      const heard = await transcribeOnce(wav, { contentType: 'audio/wav', language: dgLanguage });
+      const norm = (t) => t.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+      const saidWords = new Set(norm(said));
+      const heardWords = norm(heard.transcript);
+      const overlap = heardWords.filter((w) => saidWords.has(w)).length;
+      return json(res, 200, {
+        ok: Boolean(heard.transcript),
+        spoken: said,
+        heard: heard.transcript,
+        /* A rough score, but enough to tell "understood it" from
+           "turned Tagalog into English words that rhyme". */
+        wordsMatched: `${overlap}/${saidWords.size}`,
+        confidence: heard.confidence,
+        sttModel: heard.model,
+        sttLanguage: heard.language,
+        ttsModel: config.cartesiaModel,
+        note: 'Sonic spoke the line and Deepgram transcribed it back. Low overlap on a Taglish line means the model or language is wrong — nova-2 does not support Tagalog at all; nova-3 with language=multi does.',
+      });
+    } catch (err) {
+      return json(res, 502, { error: 'Speech-to-text check failed', detail: err.message });
+    }
   }
 
   /* Which voices this account can use — for picking a better one by name. */
@@ -137,6 +182,24 @@ const server = http.createServer(async (req, res) => {
         activeCalls,
         totalCalls,
         model: config.realtimeModel,
+        /* The one place that knows the truth about the pipeline: the keys
+           live on this service, not on Vercel, because the audio only ever
+           reaches here. */
+        stack: {
+          stt: useDeepgram() ? 'deepgram' : 'openai-realtime',
+          stt_model: useDeepgram() ? config.sttModel : config.realtimeModel,
+          stt_language: useDeepgram() ? config.sttLanguage : 'auto',
+          tts: useCartesia() ? 'cartesia' : 'openai',
+          tts_model: useCartesia() ? config.cartesiaModel : config.realtimeModel,
+          llm: useDeepgram() ? config.chatModel : config.realtimeModel,
+          stt_key_present: Boolean(config.deepgramKey),
+          tts_key_present: Boolean(config.cartesiaKey),
+          requested: { stt: config.sttProvider, tts: config.ttsProvider },
+          ...(config.sttProvider === 'deepgram' && !config.deepgramKey
+            ? { warning: 'STT_PROVIDER=deepgram but DEEPGRAM_API_KEY is not set on this service. Set it on Railway — the audio never reaches Vercel.' }
+            : {}),
+          checkWith: '/stt-check',
+        },
         tts: {
           provider: useCartesia() ? 'cartesia' : 'openai',
           requested: config.ttsProvider,
@@ -150,6 +213,7 @@ const server = http.createServer(async (req, res) => {
         /* Never echo the keys themselves. */
         openaiConfigured: Boolean(config.openaiKey),
         cartesiaConfigured: Boolean(config.cartesiaKey),
+        deepgramConfigured: Boolean(config.deepgramKey),
         apiSecretConfigured: Boolean(config.apiSecret),
       })
     );

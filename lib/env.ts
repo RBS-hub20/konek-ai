@@ -60,6 +60,11 @@ export const env = {
 
   cartesiaKey: read('CARTESIA_API_KEY'),
   deepgramKey: read('DEEPGRAM_API_KEY'),
+  /* Mirrors the bridge's own settings so the console can report what this
+     deployment is asking for. The bridge is what actually acts on them. */
+  sttProvider: (read('STT_PROVIDER') || 'realtime').toLowerCase(),
+  deepgramModel: read('DEEPGRAM_MODEL') || 'nova-3',
+  cartesiaModel: read('CARTESIA_MODEL') || 'sonic-2',
 
   stripeSecret: read('STRIPE_SECRET_KEY'),
   stripePublishable: read('NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'),

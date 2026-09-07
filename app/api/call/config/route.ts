@@ -5,7 +5,7 @@ import { buildCallPrompt, buildOpener } from '@/lib/ai/callPrompt';
 import { vibeConfig } from '@/lib/ai/vibes';
 import { languageConfig, languageToKey } from '@/lib/ai/languages';
 import { vibeToKey } from '@/lib/types2';
-import { env } from '@/lib/env';
+import { env, hasCartesia, hasDeepgram } from '@/lib/env';
 import { timingSafeEqual } from '@/lib/server/operator';
 import { fail, handle } from '@/lib/server/http';
 import type { BusinessBrain, SkillRecord } from '@/lib/types2';
@@ -81,6 +81,20 @@ export async function GET(req: Request) {
         : null,
       /* The bridge slows the voice to this. */
       speed: script ? speedFor(script, languageModeFor(script, p.get('country'))) : null,
+      /* Which pipeline this deployment is asking for.
+         The authority is the bridge, not here: the keys that matter live on
+         the Railway service because the audio never reaches Vercel. These
+         are what the app itself can see, and the bridge's own /health
+         reports what is actually running. */
+      stack: {
+        stt: env.sttProvider === 'deepgram' ? 'deepgram' : 'openai-realtime',
+        stt_model: env.sttProvider === 'deepgram' ? env.deepgramModel : 'gpt-realtime',
+        tts: hasCartesia ? 'cartesia' : 'openai',
+        tts_model: hasCartesia ? env.cartesiaModel : 'gpt-realtime',
+        stt_key_present: hasDeepgram,
+        tts_key_present: hasCartesia,
+        authority: `${env.mediaStreamUrl ? env.mediaStreamUrl.replace(/^wss:/, 'https:').replace(/\/media-stream$/, '') : '(no bridge)'}/health`,
+      },
       /* A scripted outbound call has its language already decided. */
       autoLanguage: script ? false : business.auto_language !== false,
       skillsUsed: skills.map((s) => s.id),
