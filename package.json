@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:pricing": "node scripts/pricing.test.mjs"
   },
   "dependencies": {
     "@cartesia/cartesia-js": "^4.2.0",

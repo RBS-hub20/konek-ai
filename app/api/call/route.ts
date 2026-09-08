@@ -138,7 +138,15 @@ export async function POST(req: Request) {
     try {
       const { default: Twilio } = await import('twilio');
       const client = Twilio(env.twilioSid, env.twilioToken);
+      /* Twilio cuts the call here. <Dial timeLimit> would not help: these calls
+         are <Connect><Stream>, and timeLimit on the Calls API is what caps a
+         call whatever TwiML it is running. Without it one caller who does not
+         hang up can spend a month's minutes. */
+      const capMinutes = Math.max(1, business.max_call_minutes || 3);
+      console.log(`[CallLimit] ${capMinutes} min max for ${business.name}`);
+
       const call = await client.calls.create({
+          timeLimit: capMinutes * 60,
         to: phone,
         from: from!,
         twiml: buildTwiml({ opener, vibe, language, businessId: ephemeral ? '' : business.id, campaignId }),

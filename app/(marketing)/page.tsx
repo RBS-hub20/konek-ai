@@ -10,7 +10,8 @@ import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { Button } from '@/components/ui/Button';
 import { VoiceDemo } from '@/components/marketing/VoiceDemo';
-import { HOW_IT_WORKS, PRICING, USE_CASES, VIBES, VIBE_DETAIL } from '@/lib/mockData';
+import { HOW_IT_WORKS, USE_CASES, VIBES, VIBE_DETAIL } from '@/lib/mockData';
+import { PLANS, MINUTES_TOOLTIP, callsFor } from '@/lib/pricing';
 import { cn } from '@/lib/utils';
 
 const fadeUp = {
@@ -200,9 +201,14 @@ export default function LandingPage() {
             <h2 className="mx-auto mt-5 max-w-xl font-display text-[32px] font-semibold leading-tight tracking-[-0.02em] text-ink sm:text-[40px]">
               Cheaper than one agent. Never sleeps.
             </h2>
+            {/* Minutes, not calls — a two minute enquiry and a ten minute
+                conversation are not the same thing to bill for. */}
+            <p className="mx-auto mt-4 max-w-lg text-[13px] leading-relaxed text-muted">
+              {MINUTES_TOOLTIP}
+            </p>
           </motion.div>
           <div className="mx-auto mt-14 grid max-w-5xl gap-5 lg:grid-cols-3">
-            {PRICING.map((p, i) => (
+            {PLANS.map((p, i) => (
               <motion.div
                 key={p.name}
                 {...fadeUp}
@@ -226,8 +232,22 @@ export default function LandingPage() {
                   </span>
                   {p.period && <span className="text-[13px] text-muted">{p.period}</span>}
                 </div>
-                <div className="mt-2.5 text-[12px] text-muted">{p.calls}</div>
-                <ul className="mt-8 flex flex-1 flex-col gap-3">
+
+                {/* The allowance, and what it means in calls. */}
+                <div className="mt-2.5 text-[13px] font-medium text-ink">
+                  {p.minutes.toLocaleString()} minutes included
+                </div>
+                <div className="mt-0.5 text-[12px] text-muted">{callsFor(p.minutes)}</div>
+
+                <div className="mt-4 space-y-1 border-t border-line pt-4 text-[12px] text-muted">
+                  <div>Max {p.maxCallMinutes} min per call</div>
+                  <div>
+                    ${p.overageRate.toFixed(2)}/min after
+                    {p.id === 'enterprise' && <span className="text-muted/70"> · fair use</span>}
+                  </div>
+                </div>
+
+                <ul className="mt-6 flex flex-1 flex-col gap-3">
                   {p.features.map((f) => (
                     <li key={f} className="flex items-start gap-2.5 text-[13px] text-ink">
                       <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />

@@ -78,6 +78,14 @@ export interface Business {
   billing_interval: string;
   /** The tenant the outbound sales desk dials as, and calls back to. */
   sales_tenant: boolean;
+  /* ── Metered by the minute ───────────────────────────────────── */
+  plan_name: string | null;
+  monthly_minutes_included: number;
+  minutes_used_this_month: number;
+  /** Twilio cuts the call at this, so one caller cannot burn a month. */
+  max_call_minutes: number;
+  overage_rate: number;
+  minutes_period_start: string | null;
   /** The phone that took the free call, and the call itself. */
   trial_phone: string | null;
   trial_call_id: string | null;
@@ -151,6 +159,11 @@ export interface CallLog {
   script_id: string | null;
   /** A Try Free Call demo rather than a tenant's own call. */
   is_trial: boolean;
+  duration_minutes: number | null;
+  cost: number | null;
+  billable: boolean;
+  /** Set once these minutes were added to the tenant's month. */
+  metered_at: string | null;
   created_at: string;
 }
 

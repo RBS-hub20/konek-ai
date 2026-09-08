@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/Progress';
 import { useKonekStore } from '@/lib/store';
 import { GettingStarted } from './GettingStarted';
 import { vibeToLabel } from '@/lib/types2';
+import { UsageCard } from '@/components/admin/UsageCard';
 
 const statusTone = (s: string) =>
   s === 'Hot Lead' ? 'accent' : s === 'Booked' ? 'success' : s === 'Failed' ? 'danger' : 'default';
@@ -20,6 +21,9 @@ export function OverviewTab({ onGo }: { onGo?: (tab: string) => void }) {
   return (
     <div className="space-y-8">
       {onGo && <GettingStarted onGo={onGo} />}
+
+      {/* Minutes are what the bill is made of, so they sit above the counts. */}
+      <UsageCard />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Calls Today" value={String(stats.callsToday)} delta="Since midnight" icon={<PhoneCall className="h-4 w-4" />} />

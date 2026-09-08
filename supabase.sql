@@ -75,6 +75,16 @@ alter table businesses add column if not exists subscription_status text default
 alter table businesses add column if not exists billing_interval    text default 'monthly';
 alter table businesses add column if not exists sales_tenant        boolean default false;
   -- the tenant the outbound sales desk dials as
+
+-- Metered by the minute, not by the call: Twilio, the model and the voice all
+-- bill per minute, so a call is not a unit of cost. Also in
+-- supabase_pricing_fix.sql, which can be run on its own.
+alter table businesses add column if not exists plan_name                text;
+alter table businesses add column if not exists monthly_minutes_included int   default 300;
+alter table businesses add column if not exists minutes_used_this_month  float default 0;
+alter table businesses add column if not exists max_call_minutes         int   default 3;
+alter table businesses add column if not exists overage_rate             float default 0.35;
+alter table businesses add column if not exists minutes_period_start     timestamptz default date_trunc('month', now());
   -- monthly | yearly
 alter table businesses add column if not exists trial_phone         text;   -- who took the free call
 alter table businesses add column if not exists trial_call_id       uuid;   -- the call that hooked them
@@ -257,6 +267,12 @@ alter table call_logs add column if not exists transferred_to   text;
 alter table call_logs add column if not exists transfer_status  text;   -- requested | connected | no_answer | failed
 alter table call_logs add column if not exists script_id        uuid;   -- which script Cindy read
 alter table call_logs add column if not exists is_trial         boolean default false;  -- a Try Free Call demo
+alter table call_logs add column if not exists duration_minutes float;
+alter table call_logs add column if not exists cost             float;
+alter table call_logs add column if not exists billable         boolean default true;
+-- Stamped once the minutes are on the tenant's total, so a retried Twilio
+-- callback cannot bill them twice.
+alter table call_logs add column if not exists metered_at       timestamptz;
 
 create unique index if not exists call_logs_twilio_sid_key on call_logs (twilio_sid) where twilio_sid is not null;
 

@@ -1,4 +1,5 @@
-import { bumpCampaign, findCallByTwilioSid, updateCallLog, updateContactStatus } from '@/lib/server/tenant';
+import { bumpCampaign, findCallByTwilioSid, getCallLog, safe, updateCallLog, updateContactStatus } from '@/lib/server/tenant';
+import { recordCallUsage } from '@/lib/server/usage';
 import type { CallLog } from '@/lib/types2';
 import { fail, ok, describeError } from '@/lib/server/http';
 
@@ -72,7 +73,21 @@ export async function POST(req: Request) {
       await updateContactStatus(updated.contact_id, status);
     }
 
-    return ok({ callId, updated: Boolean(updated), fields: Object.keys(patch) });
+    /* A completed call is where the minutes are known, so it is where they
+       are counted. Twilio retries this callback; recordCallUsage stamps the
+       row so a second delivery adds nothing. */
+    let metered: Awaited<ReturnType<typeof recordCallUsage>> | null = null;
+    if (status === 'Completed' || (typeof duration === 'number' && duration > 0)) {
+      const row = updated ?? existing ?? await safe(() => getCallLog(callId!), null);
+      if (row) metered = await safe(() => recordCallUsage(row, duration ?? row.duration_seconds), null);
+    }
+
+    return ok({
+      callId,
+      updated: Boolean(updated),
+      fields: Object.keys(patch),
+      ...(metered ? { usage: metered } : {}),
+    });
   } catch (err) {
     return fail('Could not record call result', 500, describeError(err).detail);
   }
